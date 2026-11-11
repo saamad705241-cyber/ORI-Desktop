@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible ORI problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the behaviour and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: 1. Open ORI...\n2. Say...\n3. Observe...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ORI version
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options: [Windows 11, Windows 10, Other]

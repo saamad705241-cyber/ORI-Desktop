@@ -1,0 +1,17 @@
+{
+  "assistant_name": "ORI",
+  "assistant_mode": "cloud",
+  "os_system": "windows",
+  "llm_provider": "ollama",
+  "llm_url": "http://localhost:11434",
+  "llm_model": "llama3.2",
+  "tts_enabled": true,
+  "tts_engine": "system",
+  "tts_rate": 180,
+  "wake_word_enabled": false,
+  "push_to_talk_enabled": false,
+  "product_name": "ORI",
+  "product_version": "3.5.0",
+  "voice_interrupt_enabled": true,
+  "github_repository": ""
+}

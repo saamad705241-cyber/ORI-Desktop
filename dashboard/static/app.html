@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ORI 3.5.0 · Remote</title>
+  <script src="/static/crypto.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #07090f;
+      --surface: rgba(255,255,255,0.04);
+      --border:  rgba(255,255,255,0.07);
+      --accent:  #43ff91;
+      --adim:    rgba(67,255,145,0.12);
+      --text:    #dde3ed;
+      --muted:   #5e6a7e;
+      --green:   #22c55e;
+      --gdim:    rgba(34,197,94,0.14);
+    }
+    html, body {
+      height: 100%; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ── HEADER ── */
+    header {
+      flex-shrink: 0; display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      background: rgba(7,9,15,0.95);
+    }
+    .logo { font-size: 15px; font-weight: 700; letter-spacing: 6px; }
+    .logo em { color: var(--accent); font-style: normal; }
+    .pill {
+      display: flex; align-items: center; gap: 6px; padding: 4px 11px;
+      border-radius: 99px; background: var(--surface); border: 1px solid var(--border);
+      font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+      color: var(--muted); transition: all 0.3s;
+    }
+    .pill.on { background: var(--gdim); border-color: rgba(34,197,94,0.3); color: var(--green); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); transition: background 0.3s; }
+    .pill.on .dot { background: var(--green); animation: blink 2s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .spacer { flex: 1; }
+    .enc-badge {
+      font-size: 9px; font-weight: 700; letter-spacing: 1.5px; padding: 3px 8px;
+      border-radius: 4px; display: none;
+    }
+    .enc-badge.on  { display: block; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25); color: var(--green); }
+    .enc-badge.off { display: block; background: rgba(255,100,100,0.08); border: 1px solid rgba(255,100,100,0.2); color: #f87171; }
+    .url { font-size: 10px; font-family: monospace; color: var(--muted); padding: 4px 9px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+
+    /* ── FEED ── */
+    main { flex: 1; overflow-y: auto; padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 10px; }
+    main::-webkit-scrollbar { width: 3px; }
+    main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .msg { max-width: 82%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.55; animation: pop 0.18s ease; }
+    @keyframes pop { from { opacity:0; transform:translateY(4px); } }
+    .msg-j   { align-self:flex-start; background:var(--adim);   border:1px solid rgba(67,255,145,0.18); border-bottom-left-radius:4px; }
+    .msg-u   { align-self:flex-end;   background:var(--surface); border:1px solid var(--border);        border-bottom-right-radius:4px; }
+    .msg-sys { align-self:center; font-size:11px; color:var(--muted); padding:2px 0; background:transparent; border:none; letter-spacing:0.3px; }
+    .lbl { font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; opacity:0.45; margin-bottom:4px; }
+    .msg-j .lbl { color:var(--accent); }
+    .msg-u .lbl { color:var(--muted); text-align:right; }
+
+    /* ── FILE CARD ── */
+    .msg-file {
+      align-self: flex-end;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; border-bottom-right-radius: 4px;
+      padding: 11px 14px; display: flex; align-items: center; gap: 12px;
+      max-width: 82%; animation: pop 0.18s ease;
+    }
+    .fc-icon { font-size: 26px; flex-shrink: 0; }
+    .fc-meta { flex: 1; min-width: 0; }
+    .fc-lbl  { font-size:9px; font-weight:700; letter-spacing:2px; text-transform:uppercase; opacity:0.45; color:var(--muted); margin-bottom:4px; }
+    .fc-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fc-size { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .fc-bar-wrap { height: 3px; background: var(--border); border-radius: 2px; margin-top: 7px; overflow: hidden; }
+    .fc-bar { height: 100%; width: 0%; background: var(--accent); border-radius: 2px; transition: width 0.12s linear; }
+    .fc-status { font-size: 10px; font-weight: 700; letter-spacing: 1px; flex-shrink: 0; color: var(--muted); }
+    .fc-status.done { color: var(--green); }
+    .fc-status.err  { color: #f87171; }
+    .fc-dl { display:block; margin-top:6px; font-size:11px; color:var(--accent); text-decoration:none; font-weight:600; }
+    .fc-dl:hover { opacity: 0.8; }
+
+    /* ── FOOTER ── */
+    footer { flex-shrink:0; padding:10px 14px; border-top:1px solid var(--border); background:rgba(7,9,15,0.95); display:flex; gap:8px; align-items:center; }
+    #inp { flex:1; padding:11px 14px; background:var(--surface); border:1.5px solid var(--border); border-radius:12px; color:var(--text); font-size:14px; outline:none; transition:border-color 0.15s; }
+    #inp:focus { border-color: var(--accent); }
+    #inp::placeholder { color: var(--muted); }
+    .btn { padding:11px 15px; border:none; border-radius:12px; font-size:11px; font-weight:700; letter-spacing:1.5px; cursor:pointer; transition:opacity 0.15s,transform 0.1s; }
+    .btn:active { transform: scale(0.96); }
+    .btn:hover  { opacity: 0.82; }
+    .btn-send { background: var(--accent); color: #fff; }
+    .btn-wake { background:var(--surface); border:1px solid var(--border); color:var(--muted); display:none; }
+    .btn-wake.show { display:block; color:var(--green); border-color:rgba(34,197,94,0.35); }
+    .btn-attach {
+      background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+      padding: 11px 13px; font-size: 16px; line-height: 1; border-radius: 12px;
+      cursor: pointer; transition: opacity 0.15s, transform 0.1s; display: flex;
+      align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .btn-attach:hover  { opacity: 0.82; border-color: var(--accent); color: var(--accent); }
+    .btn-attach:active { transform: scale(0.96); }
+
+    /* ── MIC BUTTON ── */
+    #mic-btn {
+      background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+      padding: 11px 13px; font-size: 16px; line-height: 1; border-radius: 12px;
+      cursor: pointer; transition: opacity 0.15s, transform 0.1s, background 0.2s, border-color 0.2s;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    #mic-btn:hover  { opacity: 0.82; border-color: var(--accent); color: var(--accent); }
+    #mic-btn:active { transform: scale(0.96); }
+    #mic-btn.recording {
+      background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.45); color: #ef4444;
+      animation: mic-pulse 1s ease-in-out infinite;
+    }
+    #mic-btn.unsupported { opacity: 0.3; cursor: not-allowed; }
+    @keyframes mic-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.65;transform:scale(0.97)} }
+
+
+    .btn-info { background:var(--surface); color:var(--accent); border:1px solid var(--border); padding:7px 9px; font-size:9px; letter-spacing:.8px; white-space:nowrap; }
+    .info-modal { position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.78); display:flex; align-items:center; justify-content:center; padding:14px; }
+    .info-modal[hidden] { display:none; }
+    .info-sheet { width:min(720px,100%); max-height:88vh; overflow:auto; background:#06150c; border:1px solid rgba(67,255,145,.35); box-shadow:0 0 40px rgba(67,255,145,.08); padding:20px; color:var(--text); }
+    .info-sheet h2 { color:var(--accent); font:700 15px monospace; letter-spacing:2px; margin:0 0 12px; }
+    .info-sheet h3 { color:var(--accent); font:700 11px monospace; letter-spacing:1px; margin:18px 0 8px; }
+    .info-sheet p, .info-sheet li { font-size:12px; line-height:1.65; color:#b9c8bf; }
+    .info-sheet ul { padding-left:18px; }
+    .info-sheet a { color:var(--accent); }
+    .info-close { float:right; background:transparent; border:1px solid var(--border); color:var(--accent); padding:6px 9px; cursor:pointer; }
+    @media (max-width:520px) { .url { display:none; } .btn-info { padding:7px 8px; } .info-sheet { padding:14px; } }
+
+    /* ── MOBILE AUDIO HUD ── */
+    .audio-hud {
+      flex-shrink: 0; padding: 8px 14px 10px; border-top: 1px solid var(--border);
+      background: rgba(7,9,15,0.96); display: flex; flex-direction: column; gap: 7px;
+    }
+    .audio-meta { display:flex; justify-content:space-between; align-items:center; font:700 9px monospace; letter-spacing:1.5px; color:var(--muted); }
+    #audio-mode { color:var(--accent); }
+    #waveform { display:block; width:100%; height:42px; }
+    .audio-controls { display:flex; gap:8px; }
+    .audio-control {
+      flex:1; min-height:32px; background:var(--surface); color:var(--accent);
+      border:1px solid rgba(67,255,145,.25); border-radius:3px; padding:7px 8px;
+      font:700 9px monospace; letter-spacing:1.2px; cursor:pointer;
+    }
+    .audio-control[aria-pressed="true"] { color:#ff7b86; border-color:rgba(255,90,100,.45); background:rgba(80,0,12,.20); }
+    .audio-control.stop { color:#ffc078; border-color:rgba(255,180,90,.32); }
+    .audio-control:disabled { opacity:.45; cursor:wait; }
+    @media (max-width:380px) { .audio-controls { gap:5px; } .audio-control { font-size:8px; letter-spacing:.6px; } }
+
+    /* ── ORI 3.5.0 MOBILE CONTROL DOCK ── */
+    .remote-dock { flex:0 0 auto; padding:8px 12px 9px; border-top:1px solid rgba(67,255,145,.12); background:linear-gradient(180deg,rgba(5,18,10,.97),rgba(4,10,7,.99)); }
+    .remote-tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:8px; }
+    .remote-tab { min-height:34px; border:1px solid rgba(67,255,145,.15); border-radius:9px; background:rgba(255,255,255,.025); color:var(--muted); font:700 9px monospace; letter-spacing:1px; cursor:pointer; }
+    .remote-tab.active { color:var(--accent); border-color:rgba(67,255,145,.5); background:rgba(67,255,145,.09); box-shadow:inset 0 0 18px rgba(67,255,145,.035); }
+    .remote-view { display:none; min-height:0; }
+    .remote-view.active { display:block; }
+    .remote-view-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 2px 7px; color:var(--muted); font:700 9px monospace; letter-spacing:1.2px; }
+    .remote-view-head strong { color:var(--accent); font-weight:700; }
+    .touch-layout { display:grid; grid-template-columns:minmax(0,1fr) 82px; gap:8px; align-items:stretch; }
+    #touchpad { position:relative; height:142px; border:1px solid rgba(67,255,145,.28); border-radius:13px; overflow:hidden; background:radial-gradient(ellipse at 50% 46%,rgba(67,255,145,.085),rgba(3,12,7,.72) 68%),repeating-linear-gradient(0deg,transparent 0 20px,rgba(67,255,145,.035) 21px),repeating-linear-gradient(90deg,transparent 0 20px,rgba(67,255,145,.035) 21px); touch-action:none; user-select:none; -webkit-user-select:none; }
+    #touchpad::before { content:'ORI TOUCH SURFACE'; position:absolute; top:10px; left:12px; color:rgba(115,190,143,.55); font:700 8px monospace; letter-spacing:1.4px; pointer-events:none; }
+    #touchpad::after { content:'MOVE  ·  TAP  ·  TWO-FINGER SCROLL'; position:absolute; bottom:10px; left:0; right:0; text-align:center; color:rgba(115,190,143,.5); font:8px monospace; letter-spacing:1px; pointer-events:none; }
+    #touchpad.dragging { border-color:rgba(67,255,145,.75); box-shadow:inset 0 0 28px rgba(67,255,145,.08); }
+    .touch-clicks { display:grid; grid-template-rows:1fr 1fr; gap:7px; }
+    .touch-clicks button,.remote-key,.remote-action { min-height:38px; border:1px solid rgba(67,255,145,.2); border-radius:9px; background:rgba(255,255,255,.035); color:var(--accent); font:700 9px monospace; letter-spacing:.8px; cursor:pointer; }
+    .touch-clicks button:active,.remote-key:active,.remote-action:active { background:rgba(67,255,145,.16); transform:scale(.98); }
+    .key-strip { display:flex; gap:6px; margin-top:7px; overflow-x:auto; scrollbar-width:none; }
+    .key-strip::-webkit-scrollbar { display:none; }
+    .remote-key { flex:1; min-width:42px; min-height:30px; padding:4px 8px; }
+    .remote-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; }
+    .remote-action { min-height:45px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:5px 2px; font-size:8px; }
+    .remote-action .ico { font-size:16px; line-height:1; }
+    .remote-action.danger { color:#ff8a93; border-color:rgba(255,110,125,.25); }
+    .remote-text-input { flex:1; min-width:0; min-height:36px; border:1px solid rgba(67,255,145,.22); border-radius:8px; padding:7px 10px; background:rgba(255,255,255,.035); color:var(--text); font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; outline:none; }
+    .remote-text-input:focus { border-color:var(--accent); }
+    .remote-text-input::placeholder { color:var(--muted); }
+    .screen-frame { position:relative; display:flex; min-height:110px; max-height:190px; align-items:center; justify-content:center; overflow:hidden; border:1px solid rgba(67,255,145,.22); border-radius:10px; background:#020604; }
+    #pc-screen-view { display:block; width:100%; height:100%; max-height:190px; object-fit:contain; }
+    .screen-empty { padding:24px 10px; text-align:center; color:var(--muted); font:10px monospace; letter-spacing:.5px; }
+    .screen-actions { display:flex; gap:7px; margin-top:7px; }
+    .screen-actions .remote-action { flex:1; min-height:34px; }
+    .share-note { margin:8px 2px 0; color:var(--muted); font:9px/1.5 monospace; }
+    .share-status { margin:7px 2px; font:700 9px monospace; color:var(--muted); }
+    .share-status.ready { color:var(--green); }
+    .share-status.error { color:#ff8a93; }
+    #phone-screen-preview { display:none; width:100%; max-height:130px; object-fit:contain; border:1px solid rgba(67,255,145,.15); border-radius:8px; background:#000; }
+    .remote-slider { display:flex; align-items:center; gap:9px; margin-top:8px; color:var(--muted); font:9px monospace; }
+    .remote-slider input { flex:1; accent-color:var(--accent); min-width:0; }
+    @media (max-width:520px) {
+      header { padding:9px 11px; gap:7px; }
+      .logo { font-size:14px; letter-spacing:4px; }
+      #info-open { font-size:8px; }
+      main { padding:9px 11px 6px; }
+      .remote-dock { padding:7px 9px 8px; }
+      #touchpad { height:132px; }
+      .audio-hud { padding:6px 10px 7px; }
+      #waveform { height:32px; }
+      footer { padding:7px 9px; gap:6px; }
+      #inp { padding:10px 11px; font-size:13px; }
+      .btn { padding:9px 10px; }
+    }
+    @media (max-height:690px) { #touchpad { height:105px; } .audio-hud { padding-top:5px; padding-bottom:5px; } #waveform { height:25px; } }
+
+    /* ── TOAST ── */
+    #toast {
+      position:fixed; top:66px; left:50%; transform:translateX(-50%) translateY(-8px);
+      background:rgba(34,197,94,0.16); border:1px solid rgba(34,197,94,0.4);
+      color:var(--green); font-size:12px; font-weight:700; letter-spacing:1px;
+      padding:7px 18px; border-radius:99px;
+      opacity:0; transition:opacity 0.22s,transform 0.22s;
+      pointer-events:none; white-space:nowrap;
+    }
+    #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+  <div id="toast"></div>
+
+  <div id="info-modal" class="info-modal" hidden role="dialog" aria-modal="true" aria-labelledby="info-title">
+    <section class="info-sheet">
+      <button class="info-close" onclick="closeInfo()" aria-label="Close information">CLOSE ×</button>
+      <h2 id="info-title">ORI 3.5.0 / SYSTEM INFORMATION</h2>
+      <div id="about-details">
+        <p><strong>Purpose:</strong> ORI is a personal voice-and-text desktop assistant for supported research, file understanding and user-approved actions on the connected computer.</p>
+        <p><strong>Current state:</strong> Enhancement build. Build date: 11 November 2026. Account sign-in and automatic updates are coming soon.</p>
+        <p><strong>Runtime:</strong> ORI 3.5.0 is the application/runtime identity. This build's live language and voice features use a configured Google-hosted model; ORI is not a claim of a separately trained foundation model.</p>
+        <p><strong>Capabilities:</strong> The mobile dashboard can send text commands, capture voice input, transfer supported files and control wake/interrupt actions. Results depend on actual desktop tools, permissions and connectivity.</p>
+      </div>
+      <div class="info-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0">
+        <button class="btn btn-info" type="button" onclick="toggleInfoSection('developer-details')">ABOUT DEVELOPER</button>
+        <button class="btn btn-info" type="button" onclick="toggleInfoSection('terms-details')">TERMS & CONDITIONS</button>
+      </div>
+      <div id="developer-details" hidden>
+        <h3>ABOUT DEVELOPER</h3>
+        <p><strong>Abdul Samad</strong> is a student and the creator/developer of ORI. According to the project creator, active development began in September 2026. The project is in pre-release testing before the planned final release on 1 November 2026. AI-assisted coding has been used; the exact number of human contributors is not verified.</p>
+        <p style="display:flex;align-items:center;gap:9px">
+          <a href="https://www.instagram.com/_samad02/" target="_blank" rel="noopener noreferrer" aria-label="Open Instagram @_samad02" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none">
+            <svg width="24" height="24" viewBox="0 0 24 24" role="img" aria-label="Instagram logo"><defs><linearGradient id="ig-gradient" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#feda75"/><stop offset="0.45" stop-color="#fa7e1e"/><stop offset="0.72" stop-color="#d62976"/><stop offset="1" stop-color="#4f5bd5"/></linearGradient></defs><rect x="2.5" y="2.5" width="19" height="19" rx="5.3" fill="none" stroke="url(#ig-gradient)" stroke-width="2"/><circle cx="12" cy="12" r="4.3" fill="none" stroke="url(#ig-gradient)" stroke-width="2"/><circle cx="17.7" cy="6.5" r="1.25" fill="#fa7e1e"/></svg>
+            <strong>@_samad02</strong>
+          </a>
+        </p>
+      </div>
+      <div id="terms-details" hidden>
+        <h3>TERMS & CONDITIONS</h3>
+        <p><strong>Effective:</strong> 11 November 2026 · ORI 3.5.0 enhancement build. Some services remain in preview.</p>
+        <h3>1. PREVIEW SOFTWARE</h3><p>ORI is evaluation software. Features may be incomplete, changed, interrupted or removed. No guaranteed uptime, accuracy or availability is promised.</p>
+        <h3>2. AI OUTPUTS</h3><p>AI responses can be inaccurate, incomplete or outdated. Verify important information independently. ORI is not a substitute for qualified professional advice.</p>
+        <h3>3. DESKTOP ACTIONS</h3><p>You are responsible for commands and results on the connected computer. Review requested actions and do not authorize an action unless you understand its likely effect. Safety confirmations are not infallible.</p>
+        <h3>4. THIRD-PARTY SERVICES & DATA</h3><p>Voice/audio, transcripts, text, images and relevant context may be sent to the configured hosted AI service to process a request. Third-party terms, privacy policies, quotas and billing rules apply. Avoid submitting passwords, payment details, private keys or confidential data.</p>
+        <h3>5. LOCAL CREDENTIALS</h3><p>Settings and service keys may be stored in local configuration files such as <code>config/api_keys.json</code>. Protect your Windows account and project folder. Do not publish configuration files; revoke exposed keys.</p>
+        <h3>6. MIC, CAMERA & FILES</h3><p>Enable microphone, camera, screen and file features intentionally. Obtain necessary permission before processing or sharing anyone's voice, image, screen contents or files.</p>
+        <h3>7. REMOTE CONTROL</h3><p>Pair only trusted phones, keep pairing codes private, revoke devices you no longer use, and do not expose the remote-control service directly to the public internet. A paired phone can trigger supported PC actions.</p>
+        <h3>8. ACCEPTABLE USE</h3><p>Do not use ORI for unlawful access, harassment, infringement, bypassing security controls or harmful actions. Respect applicable law and third-party terms.</p>
+        <h3>9. SECURITY & AVAILABILITY</h3><p>No software is completely secure or error-free. Keep dependencies updated and back up important data. API quotas, network outages, OS permissions and driver issues can interrupt features.</p>
+        <h3>10. OPEN-SOURCE & THIRD-PARTY LICENSES</h3><p>This build includes derivative source based on MARK LV by FatihMakes under CC BY-NC 4.0, as well as components with separate licences. Preserve attribution and review licenses before redistribution. Commercial use of covered non-commercial code requires separate permission or replacement with code licensed for that use.</p>
+        <h3>11. NO WARRANTY</h3><p>To the maximum extent permitted by law, ORI is provided “as is” and “as available”. You are responsible for backups, approvals and verifying actions. Mandatory legal rights are not excluded.</p>
+        <h3>12. CHANGES</h3><p>Terms may change with future versions. Review the terms and effective date after updates. These general preview terms are not legal advice.</p>
+        <h3>13. PROJECT CONTACT</h3><p>Project contact: Instagram: <a href="https://www.instagram.com/_samad02/" target="_blank" rel="noopener noreferrer">@_samad02</a>.</p>
+      </div>
+    </section>
+  </div>
+  <header>
+    <div class="logo"><em>O</em>RI <span style="font-size:9px;letter-spacing:1px;color:var(--muted)">3.5.0</span></div>
+    <div class="pill" id="pill"><span class="dot"></span><span id="st">Connecting</span></div>
+    <div class="enc-badge" id="enc">AES-256</div>
+    <div class="spacer"></div>
+    <button class="btn btn-info" id="info-open" type="button" onclick="openInfo()">ABOUT / TERMS</button>
+    <div class="url">__IP__:__PORT__</div>
+  </header>
+  <main id="feed"></main>
+  <section class="remote-dock" aria-label="Phone remote controls">
+    <nav class="remote-tabs" aria-label="Remote tools">
+      <button class="remote-tab active" data-remote-tab="touchpad" type="button">TOUCHPAD</button>
+      <button class="remote-tab" data-remote-tab="screen" type="button">PC SCREEN</button>
+      <button class="remote-tab" data-remote-tab="quick" type="button">QUICK</button>
+      <button class="remote-tab" data-remote-tab="phone-share" type="button">PHONE SHARE</button>
+    </nav>
+    <section class="remote-view active" id="remote-view-touchpad">
+      <div class="remote-view-head"><strong>DESKTOP POINTER</strong><span id="control-connection">CONNECTING</span></div>
+      <div class="touch-layout">
+        <div id="touchpad" aria-label="Touchpad control surface"></div>
+        <div class="touch-clicks">
+          <button type="button" id="left-click">LEFT<br>CLICK</button>
+          <button type="button" id="right-click">RIGHT<br>CLICK</button>
+        </div>
+      </div>
+      <div class="key-strip">
+        <button class="remote-key" data-key="esc">ESC</button>
+        <button class="remote-key" data-key="tab">TAB</button>
+        <button class="remote-key" data-key="enter">ENTER</button>
+        <button class="remote-key" data-hotkey="alt+tab">ALT · TAB</button>
+        <button class="remote-key" data-hotkey="win+d">DESKTOP</button>
+      </div>
+      <label class="remote-slider">POINTER SPEED <input id="pointer-speed" type="range" min="0.5" max="2.5" step="0.1" value="1.2"><span id="pointer-speed-value">1.2×</span></label>
+      <label class="remote-slider">SCROLL SPEED <input id="scroll-speed" type="range" min="0.5" max="2.5" step="0.1" value="1.2"><span id="scroll-speed-value">1.2×</span></label>
+    </section>
+    <section class="remote-view" id="remote-view-screen">
+      <div class="remote-view-head"><strong>LIVE PC DISPLAY</strong><span id="pc-screen-status">OFFLINE</span></div>
+      <div class="screen-frame" id="pc-screen-frame"><div class="screen-empty">PC SCREEN PREVIEW<br>START TO VIEW THIS COMPUTER</div><img id="pc-screen-view" alt="Live PC screen" hidden></div>
+      <div class="screen-actions">
+        <button class="remote-action" id="pc-screen-toggle" type="button">▶ START LIVE VIEW</button>
+        <button class="remote-action" id="pc-screen-shot" type="button">▣ SNAPSHOT</button>
+      </div>
+      <p class="share-note">Local Wi-Fi stream · up to 8 FPS · stops when you leave this view.</p>
+    </section>
+    <section class="remote-view" id="remote-view-quick">
+      <div class="remote-view-head"><strong>PC QUICK CONTROLS</strong><span>PAIRED DEVICE</span></div>
+      <div class="remote-grid">
+        <button class="remote-action" data-media="previous"><span class="ico">⏮</span>PREVIOUS</button>
+        <button class="remote-action" data-media="play_pause"><span class="ico">⏯</span>PLAY / PAUSE</button>
+        <button class="remote-action" data-media="next"><span class="ico">⏭</span>NEXT</button>
+        <button class="remote-action" data-media="volume_mute"><span class="ico">◖</span>MUTE AUDIO</button>
+        <button class="remote-action" data-media="volume_down"><span class="ico">－</span>VOLUME DOWN</button>
+        <button class="remote-action" data-media="volume_up"><span class="ico">＋</span>VOLUME UP</button>
+        <button class="remote-action" data-system="show_desktop"><span class="ico">▣</span>SHOW DESKTOP</button>
+        <button class="remote-action" data-system="open_explorer"><span class="ico">▤</span>FILES</button>
+        <button class="remote-action" data-system="switch_window"><span class="ico">▱</span>SWITCH APP</button>
+        <button class="remote-action" data-system="open_settings"><span class="ico">⚙</span>SETTINGS</button>
+        <button class="remote-action" data-system="lock_pc"><span class="ico">⌑</span>LOCK PC</button>
+        <button class="remote-action" id="pc-mic-toggle"><span class="ico">🎙</span>PC MIC</button>
+        <button class="remote-action danger" id="pc-stop-voice"><span class="ico">■</span>STOP ORI</button>
+      </div>
+      <label class="remote-slider">PC VOLUME <input id="pc-volume" type="range" min="0" max="100" step="1" value="55"><span id="pc-volume-value">55%</span></label>
+      <div class="screen-actions" style="margin-top:8px">
+        <input id="pc-type-text" class="remote-text-input" type="text" maxlength="2000" placeholder="Type into the focused PC app…" autocomplete="off">
+        <button class="remote-action" id="pc-type-send" type="button">TYPE</button>
+      </div>
+      <div class="screen-actions" style="margin-top:8px">
+        <button class="remote-action" id="revoke-phone" type="button">REVOKE THIS PHONE</button>
+      </div>
+    </section>
+    <section class="remote-view" id="remote-view-phone-share">
+      <div class="remote-view-head"><strong>SHARE PHONE SCREEN TO ORI</strong><span id="phone-share-indicator">OFF</span></div>
+      <video id="phone-screen-preview" autoplay muted playsinline></video>
+      <div class="screen-actions">
+        <button class="remote-action" id="phone-share-start" type="button">▣ START PHONE SHARE</button>
+        <button class="remote-action" id="phone-share-stop" type="button" disabled>STOP</button>
+      </div>
+      <div class="screen-actions">
+        <button class="remote-action" id="phone-screen-analyze" type="button">✦ ASK ORI ABOUT THIS SCREEN</button>
+      </div>
+      <div class="screen-actions">
+        <button class="remote-action" id="android-companion-code" type="button">PAIR ANDROID SCREEN COMPANION</button>
+      </div>
+      <div class="share-status" id="phone-share-status">OFF · SHARE ONLY WHEN YOU CHOOSE</div>
+      <div class="share-status" id="android-companion-code-view" hidden></div>
+      <p class="share-note" id="phone-share-note">Your screen frames stay in memory and are sent to Gemini only when you ask ORI to analyze them. Android Chrome does not provide full-device browser screen capture; use the optional native ORI Screen Companion for that feature.</p>
+    </section>
+  </section>
+  <section class="audio-hud" aria-label="Audio activity">
+    <div class="audio-meta"><span id="audio-mode">STANDBY</span><span id="mic-state">PHONE MIC ON</span></div>
+    <canvas id="waveform" aria-label="Live audio waveform"></canvas>
+    <div class="audio-controls">
+      <button class="audio-control" id="remote-mute" type="button" aria-pressed="false" onclick="togglePhoneMute()">PHONE MIC ON</button>
+      <button class="audio-control" id="remote-desktop-mute" type="button" aria-pressed="false" onclick="toggleDesktopMute()">PC MIC: CHECKING</button>
+      <button class="audio-control" id="remote-screen" type="button" onclick="captureDesktopScreen()">PC SCREEN</button>
+      <button class="audio-control stop" id="remote-stop" type="button" onclick="interruptVoice()">STOP VOICE</button>
+    </div>
+  </section>
+  <footer>
+    <input id="inp" placeholder="Send a command to ORI…" autocomplete="off">
+    <label class="btn-attach" for="file-inp" title="Send file">📎</label>
+    <input type="file" id="file-inp" multiple accept="*/*" style="display:none">
+    <button id="mic-btn" onclick="doMic()" title="Voice command">🎤</button>
+    <button class="btn btn-wake" id="wake" onclick="doWake()">WAKE</button>
+    <button class="btn btn-send" onclick="doSend()">SEND</button>
+  </footer>
+
+  <script>
+    function openInfo() {
+      document.getElementById('info-modal').hidden = false;
+      document.getElementById('developer-details').hidden = true;
+      document.getElementById('terms-details').hidden = true;
+    }
+    function closeInfo() { document.getElementById('info-modal').hidden = true; }
+    function toggleInfoSection(id) {
+      const section = document.getElementById(id);
+      if (!section) return;
+      section.hidden = !section.hidden;
+      if (!section.hidden) section.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    document.getElementById('info-modal').addEventListener('click', e => {
+      if (e.target.id === 'info-modal') closeInfo();
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeInfo(); });
+
+    // ── Auth — bearer token ───────────────────────────────────────────────────
+    const _authToken  = sessionStorage.getItem('jarvis_token');
+    const _sessionKey = sessionStorage.getItem('jarvis_key');
+
+    if (!_authToken) {
+      location.replace('/login');
+    }
+
+    function _authHeader() { return { 'Authorization': `Bearer ${_authToken}` }; }
+    function _authFetch(url, opts = {}) {
+      opts.headers = Object.assign({}, opts.headers, _authHeader());
+      return fetch(url, opts);
+    }
+
+    // ── AES-256-CBC encryption (CryptoJS) ────────────────────────────────────
+    const _AES_SALT = 'JARVIS-DASHBOARD-v1';
+    let _aesKey = null;
+
+    function _initCrypto(key) {
+      if (typeof CryptoJS === 'undefined') return false;
+      _aesKey = CryptoJS.SHA256(key + _AES_SALT);
+      return true;
+    }
+
+    function _encrypt(plaintext) {
+      if (!_aesKey || typeof CryptoJS === 'undefined') return null;
+      try {
+        const iv  = CryptoJS.lib.WordArray.random(16);
+        const enc = CryptoJS.AES.encrypt(
+          CryptoJS.enc.Utf8.parse(plaintext), _aesKey,
+          { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+        );
+        const ivHex = iv.toString(CryptoJS.enc.Hex);
+        const ctHex = enc.ciphertext.toString(CryptoJS.enc.Hex);
+        const hex   = ivHex + ctHex;
+        const bytes = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < bytes.length; i++)
+          bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+        return btoa(String.fromCharCode(...bytes));
+      } catch { return null; }
+    }
+
+    const _encReady = _sessionKey ? _initCrypto(_sessionKey) : false;
+    const encBadge  = document.getElementById('enc');
+    if (_encReady) { encBadge.className = 'enc-badge on'; }
+    else           { encBadge.className = 'enc-badge off'; encBadge.textContent = 'NO ENC'; }
+
+    // ── WebSocket ─────────────────────────────────────────────────────────────
+    const feed  = document.getElementById('feed');
+    const pill  = document.getElementById('pill');
+    const stTxt = document.getElementById('st');
+    const wake  = document.getElementById('wake');
+
+    const _wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const _wsUrl   = `${_wsProto}://${location.host}/ws?token=${encodeURIComponent(_authToken)}`;
+    const ws       = new WebSocket(_wsUrl);
+
+    ws.onopen    = () => {
+      sys('Remote session active.');
+      toast('Connected to ORI');
+      _loadDesktopMicState();
+    };
+    ws.onclose   = () => sys('Connection lost — refresh to reconnect.');
+    ws.onerror   = () => sys('Connection error.');
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.type === 'log')           append(m.speaker, m.text);
+      if (m.type === 'status')        setStatus(m.state);
+      if (m.type === 'activity_state') setStatus(m.state);
+      if (m.type === 'wake')          sys('Wake word detected — connecting…');
+      if (m.type === 'sys')           sys(m.text);
+      if (m.type === 'file_received') _onFileReceived(m);
+      if (m.type === 'audio_level') _onDesktopAudioLevel(m);
+      if (m.type === 'desktop_mic') _setDesktopMicMuted(!!m.muted);
+    };
+
+    function setStatus(s) {
+      const raw = String(s || 'READY').toUpperCase();
+      const labels = {
+        ACTIVE:'Active', READY:'Ready', INITIALISING:'Initialising', CONNECTING:'Connecting',
+        LISTENING:'Listening', THINKING:'Thinking', PROCESSING:'Processing', SPEAKING:'Speaking',
+        SEARCHING:'Searching', 'READING FILE':'Reading file', EXECUTING:'Executing',
+        'ANALYZING SCREEN':'Analyzing screen', INTERRUPTED:'Interrupted',
+        SLEEPING:'Sleeping', 'MIC MUTED':'Mic muted', ERROR:'Error', DISCONNECTED:'Disconnected', OFFLINE:'Offline'
+      };
+      const sleepy = raw === 'SLEEPING';
+      const bad = raw === 'ERROR' || raw === 'DISCONNECTED' || raw === 'OFFLINE';
+      pill.className = 'pill' + (sleepy || bad ? '' : ' on');
+      stTxt.textContent = labels[raw] || raw.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+      if (sleepy) wake.classList.add('show'); else wake.classList.remove('show');
+    }
+
+    function append(speaker, text) {
+      const d = document.createElement('div');
+      if (speaker === 'jarvis' || speaker === 'ori') {
+        d.className = 'msg msg-j';
+        d.innerHTML = `<div class="lbl">ORI</div>${esc(text)}`;
+      } else {
+        d.className = 'msg msg-u';
+        d.innerHTML = `<div class="lbl">You</div>${esc(text)}`;
+      }
+      feed.appendChild(d);
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function sys(text) {
+      const d = document.createElement('div');
+      d.className = 'msg msg-sys'; d.textContent = text;
+      feed.appendChild(d); feed.scrollTop = feed.scrollHeight;
+    }
+
+    function esc(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ── File helpers ──────────────────────────────────────────────────────────
+    function _fileIcon(name) {
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      if (['jpg','jpeg','png','gif','webp','heic','heif','avif','bmp','svg'].includes(ext)) return '🖼️';
+      if (['mp4','mov','avi','mkv','webm','m4v','3gp'].includes(ext))                       return '🎬';
+      if (['mp3','m4a','wav','flac','aac','ogg','opus'].includes(ext))                      return '🎵';
+      if (['pdf'].includes(ext))                                                             return '📋';
+      if (['doc','docx','txt','md','rtf','odt'].includes(ext))                              return '📝';
+      if (['xls','xlsx','csv','ods'].includes(ext))                                         return '📊';
+      if (['ppt','pptx','odp'].includes(ext))                                               return '📑';
+      if (['zip','rar','7z','tar','gz','bz2','xz'].includes(ext))                          return '📦';
+      if (['apk','exe','dmg','deb','rpm','msi'].includes(ext))                              return '⚙️';
+      return '📎';
+    }
+
+    function _fmtSize(bytes) {
+      if (bytes < 1024)             return bytes + ' B';
+      if (bytes < 1024 * 1024)     return (bytes / 1024).toFixed(1) + ' KB';
+      if (bytes < 1024 ** 3)       return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+      return (bytes / 1024 ** 3).toFixed(2) + ' GB';
+    }
+
+    // ── File upload (phone → computer) ────────────────────────────────────────
+    function _uploadFile(file) {
+      const id = 'fc_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+
+      // Create file card in feed
+      const card = document.createElement('div');
+      card.className = 'msg-file';
+      card.id = id;
+      card.innerHTML = `
+        <div class="fc-icon">${_fileIcon(file.name)}</div>
+        <div class="fc-meta">
+          <div class="fc-lbl">Sending</div>
+          <div class="fc-name">${esc(file.name)}</div>
+          <div class="fc-size">${_fmtSize(file.size)}</div>
+          <div class="fc-bar-wrap"><div class="fc-bar" id="${id}_bar"></div></div>
+        </div>
+        <div class="fc-status" id="${id}_st">0%</div>
+      `;
+      feed.appendChild(card);
+      feed.scrollTop = feed.scrollHeight;
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload');
+      xhr.setRequestHeader('Authorization', `Bearer ${_authToken}`);
+
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        const pct = Math.round(e.loaded / e.total * 100);
+        const bar = document.getElementById(`${id}_bar`);
+        const st  = document.getElementById(`${id}_st`);
+        if (bar) bar.style.width = pct + '%';
+        if (st)  st.textContent  = pct + '%';
+      };
+
+      xhr.onload = () => {
+        const bar  = document.getElementById(`${id}_bar`);
+        const st   = document.getElementById(`${id}_st`);
+        const meta = card.querySelector('.fc-meta');
+        const lbl  = card.querySelector('.fc-lbl');
+        if (xhr.status === 200) {
+          let savedName = file.name;
+          try { savedName = JSON.parse(xhr.responseText).name || file.name; } catch {}
+          const dlUrl = `/uploads/${encodeURIComponent(savedName)}?token=${encodeURIComponent(_authToken)}`;
+          if (bar)  { bar.style.width = '100%'; bar.style.background = 'var(--green)'; }
+          if (st)   { st.textContent = '✓'; st.className = 'fc-status done'; }
+          if (lbl)  lbl.textContent = 'Sent';
+          if (meta) meta.insertAdjacentHTML('beforeend',
+            `<a class="fc-dl" href="${dlUrl}" download="${esc(savedName)}">⬇ Download back</a>`);
+          toast('File sent!');
+        } else {
+          let errMsg = 'Upload failed';
+          try { errMsg = JSON.parse(xhr.responseText).error || errMsg; } catch {}
+          if (bar) bar.style.background = '#f87171';
+          if (st)  { st.textContent = 'ERR'; st.className = 'fc-status err'; }
+          if (lbl) lbl.textContent = errMsg;
+        }
+      };
+
+      xhr.onerror = () => {
+        const st  = document.getElementById(`${id}_st`);
+        const lbl = card.querySelector('.fc-lbl');
+        if (st)  { st.textContent = 'ERR'; st.className = 'fc-status err'; }
+        if (lbl) lbl.textContent = 'Connection error';
+      };
+
+      const fd = new FormData();
+      fd.append('file', file);
+      xhr.send(fd);
+    }
+
+    // File received by another WebSocket client (e.g., second open tab)
+    function _onFileReceived(m) {
+      const dlUrl = `/uploads/${encodeURIComponent(m.name)}?token=${encodeURIComponent(_authToken)}`;
+      const card  = document.createElement('div');
+      card.className = 'msg-file';
+      card.innerHTML = `
+        <div class="fc-icon">${_fileIcon(m.name)}</div>
+        <div class="fc-meta">
+          <div class="fc-lbl">Received</div>
+          <div class="fc-name">${esc(m.name)}</div>
+          <div class="fc-size">${_fmtSize(m.size)}</div>
+          <a class="fc-dl" href="${dlUrl}" download="${esc(m.name)}">⬇ Download</a>
+        </div>
+        <div class="fc-status done">✓</div>
+      `;
+      feed.appendChild(card);
+      feed.scrollTop = feed.scrollHeight;
+      toast('File received on computer!');
+    }
+
+    // File input change handler
+    document.getElementById('file-inp').addEventListener('change', function () {
+      Array.from(this.files).forEach(_uploadFile);
+      this.value = ''; // reset so the same file can be re-sent
+    });
+
+    // ── Audio waveform + remote controls ──────────────────────────────────────
+    const waveCanvas = document.getElementById('waveform');
+    const waveCtx = waveCanvas.getContext('2d');
+    const audioModeEl = document.getElementById('audio-mode');
+    const micStateEl = document.getElementById('mic-state');
+    const remoteMuteBtn = document.getElementById('remote-mute');
+    const remoteStopBtn = document.getElementById('remote-stop');
+    let _phoneMuted = false;
+    let _phoneInputLevel = 0;
+    let _desktopInputLevel = 0;
+    let _desktopOutputLevel = 0;
+    let _desktopInputAt = 0;
+    let _desktopOutputAt = 0;
+    let _phoneInputAt = 0;
+    let _phoneAnalyser = null;
+    let _phoneFrequencyData = null;
+    let _phoneSpectrum = Array(64).fill(0);
+    let _desktopInputSpectrum = Array(64).fill(0);
+    let _desktopOutputSpectrum = Array(64).fill(0);
+    let _displaySpectrum = Array(64).fill(0);
+
+    function _setPhoneMuted(muted) {
+      _phoneMuted = !!muted;
+      remoteMuteBtn.textContent = _phoneMuted ? 'MIC MUTED' : 'MIC ON';
+      remoteMuteBtn.setAttribute('aria-pressed', String(_phoneMuted));
+      remoteMuteBtn.title = _phoneMuted ? 'Phone microphone audio is blocked from ORI' : 'Send phone microphone audio to ORI';
+      micStateEl.textContent = _phoneMuted ? 'PHONE MIC MUTED' : 'PHONE MIC ON';
+      micStateEl.style.color = _phoneMuted ? '#ff7b86' : 'var(--muted)';
+      if (_phoneMuted) _phoneInputLevel = 0;
+    }
+
+    function togglePhoneMute() {
+      _setPhoneMuted(!_phoneMuted);
+      toast(_phoneMuted ? 'Phone mic muted' : 'Phone mic on');
+    }
+
+    const remoteDesktopMuteBtn = document.getElementById('remote-desktop-mute');
+    let _desktopMicMuted = false;
+
+    function _setDesktopMicMuted(muted) {
+      _desktopMicMuted = !!muted;
+      remoteDesktopMuteBtn.textContent = _desktopMicMuted ? 'UNMUTE PC MIC' : 'MUTE PC MIC';
+      remoteDesktopMuteBtn.setAttribute('aria-pressed', String(_desktopMicMuted));
+      remoteDesktopMuteBtn.title = _desktopMicMuted
+        ? 'The microphone on the connected PC is muted'
+        : 'Mute the microphone on the connected PC';
+    }
+
+    async function _loadDesktopMicState() {
+      try {
+        const response = await _authFetch('/api/desktop-mic');
+        const data = await response.json();
+        if (response.ok && data.ok) _setDesktopMicMuted(!!data.muted);
+        else remoteDesktopMuteBtn.textContent = 'PC MIC UNAVAILABLE';
+      } catch (_) {
+        remoteDesktopMuteBtn.textContent = 'PC MIC UNAVAILABLE';
+      }
+    }
+
+    async function toggleDesktopMute() {
+      remoteDesktopMuteBtn.disabled = true;
+      try {
+        const response = await _authFetch('/api/desktop-mic', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({muted: !_desktopMicMuted})
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || 'PC microphone control unavailable');
+        _setDesktopMicMuted(!!data.muted);
+        toast(_desktopMicMuted ? 'PC microphone muted' : 'PC microphone unmuted');
+      } catch (error) {
+        sys('PC microphone control failed: ' + String(error.message || error));
+      } finally {
+        remoteDesktopMuteBtn.disabled = false;
+      }
+    }
+
+    // Keep the phone view in sync when the PC user changes mute state locally.
+    setInterval(_loadDesktopMicState, 6000);
+
+    async function interruptVoice() {
+      remoteStopBtn.disabled = true;
+      const oldText = remoteStopBtn.textContent;
+      remoteStopBtn.textContent = 'STOPPING…';
+      try {
+        const response = await _authFetch('/api/interrupt', { method: 'POST' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) throw new Error(data.error || 'Interrupt failed');
+        sys('ORI speech interrupted — listening can resume.');
+        toast('Voice interrupted');
+      } catch (e) {
+        sys('Could not interrupt ORI: ' + (e.message || 'connection error'));
+      } finally {
+        remoteStopBtn.disabled = false;
+        remoteStopBtn.textContent = oldText;
+      }
+    }
+
+    function _onDesktopAudioLevel(m) {
+      const level = Math.min(1, Math.max(0, Number(m.level) || 0));
+      const bands = Array.isArray(m.spectrum) ? m.spectrum.slice(0, 64).map(v => Math.min(1, Math.max(0, Number(v) || 0))) : Array(64).fill(0);
+      while (bands.length < 64) bands.push(0);
+      if (m.source === 'input') { _desktopInputLevel = level; _desktopInputAt = performance.now(); _desktopInputSpectrum = bands; }
+      else if (m.source === 'output') { _desktopOutputLevel = level; _desktopOutputAt = performance.now(); _desktopOutputSpectrum = bands; }
+    }
+
+    function _phoneSpectrumNow() {
+      if (!_voiceWs || _phoneMuted || !_phoneAnalyser || !_phoneFrequencyData) return Array(64).fill(0);
+      try {
+        _phoneAnalyser.getByteFrequencyData(_phoneFrequencyData);
+        const out = Array(64).fill(0);
+        const n = _phoneFrequencyData.length;
+        // Log-spaced bands are perceptually useful for bass/mid/treble visualization.
+        for (let b = 0; b < out.length; b++) {
+          const lo = Math.max(1, Math.floor(Math.pow(n, b / out.length)));
+          const hi = Math.max(lo + 1, Math.min(n, Math.floor(Math.pow(n, (b + 1) / out.length))));
+          let peak = 0;
+          for (let j = lo; j < hi; j++) peak = Math.max(peak, _phoneFrequencyData[j] / 255);
+          out[b] = Math.min(1, Math.pow(peak, 0.8) * Math.min(1, _phoneInputLevel * 2.2 + 0.08));
+        }
+        return out;
+      } catch (_) { return Array(64).fill(0); }
+    }
+
+    function _drawWaveform() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const rect = waveCanvas.getBoundingClientRect();
+      const w = Math.max(1, Math.floor(rect.width * dpr));
+      const h = Math.max(1, Math.floor(rect.height * dpr));
+      if (waveCanvas.width !== w || waveCanvas.height !== h) { waveCanvas.width = w; waveCanvas.height = h; }
+      waveCtx.clearRect(0, 0, w, h);
+      const now = performance.now();
+      _phoneInputLevel *= now - _phoneInputAt > 150 ? 0.88 : 0.98;
+      _desktopInputLevel *= now - _desktopInputAt > 180 ? 0.90 : 0.995;
+      _desktopOutputLevel *= now - _desktopOutputAt > 180 ? 0.90 : 0.995;
+      const phoneLevel = (!_phoneMuted && _voiceWs) ? _phoneInputLevel : 0;
+      const outputActive = _desktopOutputLevel > 0.018;
+      const usePhone = phoneLevel > _desktopInputLevel && phoneLevel > 0.01;
+      const inputLevel = Math.max(phoneLevel, _desktopInputLevel);
+      const inputSpectrum = usePhone ? _phoneSpectrumNow() : _desktopInputSpectrum;
+      const targetSpectrum = outputActive ? _desktopOutputSpectrum : inputSpectrum;
+      const activeLevel = outputActive ? _desktopOutputLevel : inputLevel;
+      // Attack is fast, release is gradual. Silence ultimately settles to a line.
+      for (let i = 0; i < _displaySpectrum.length; i++) {
+        const target = activeLevel < 0.01 ? 0 : (Number(targetSpectrum[i]) || 0);
+        const speed = target > _displaySpectrum[i] ? 0.48 : 0.11;
+        _displaySpectrum[i] += (target - _displaySpectrum[i]) * speed;
+      }
+      const peak = Math.max(..._displaySpectrum);
+      const y = h / 2;
+      const muted = _phoneMuted && !outputActive && _desktopInputLevel < 0.01;
+      waveCtx.strokeStyle = peak > 0.012 ? (outputActive ? '#ffc36b' : '#43ff91') : (muted ? '#ff6878' : 'rgba(67,255,145,.72)');
+      waveCtx.lineWidth = Math.max(1, dpr);
+      waveCtx.shadowBlur = peak > 0.012 ? 7 * dpr : 0;
+      waveCtx.shadowColor = outputActive ? '#ffc36b' : '#43ff91';
+      waveCtx.beginPath();
+      if (peak <= 0.012) {
+        waveCtx.moveTo(0, y); waveCtx.lineTo(w, y);
+        audioModeEl.textContent = muted ? 'MIC MUTED' : (_voiceWs ? 'LISTENING · SILENT' : 'STANDBY');
+      } else {
+        const count = Math.max(48, Math.floor(w / (3.2 * dpr)));
+        for (let i = 0; i < count; i++) {
+          const u = i / Math.max(1, count - 1);
+          const idx = Math.min(63, Math.floor(u * 63));
+          const v = _displaySpectrum[idx] || 0;
+          const edge = Math.pow(Math.sin(Math.PI * u), 0.34);
+          const bh = Math.max(1, v * h * 0.46 * (0.20 + 0.80 * edge));
+          const x = u * w;
+          waveCtx.moveTo(x, y - bh); waveCtx.lineTo(x, y + bh);
+        }
+        audioModeEl.textContent = outputActive ? 'ORI OUTPUT · SPECTRUM' : (usePhone ? 'PHONE INPUT · SPECTRUM' : 'DESKTOP INPUT · SPECTRUM');
+      }
+      waveCtx.stroke();
+      waveCtx.shadowBlur = 0;
+      requestAnimationFrame(_drawWaveform);
+    }
+    requestAnimationFrame(_drawWaveform);
+    window.addEventListener('resize', () => { waveCanvas.width = 0; waveCanvas.height = 0; });
+
+    // ── Explicit PC screen capture (paired device only) ───────────────────────
+    async function captureDesktopScreen() {
+      const button = document.getElementById('remote-screen');
+      if (button) { button.disabled = true; button.textContent = 'CAPTURING…'; }
+      try {
+        const response = await _authFetch('/api/desktop/screenshot', { cache: 'no-store' });
+        if (!response.ok) {
+          let message = 'Screen capture unavailable';
+          try { const data = await response.json(); message = data.error || message; } catch (_) {}
+          throw new Error(message);
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const card = document.createElement('div');
+        card.className = 'msg-file';
+        card.style.alignSelf = 'stretch';
+        card.style.flexDirection = 'column';
+        card.style.alignItems = 'stretch';
+        const img = document.createElement('img');
+        img.src = url; img.alt = 'Live PC screenshot';
+        img.style.cssText = 'display:block;width:100%;height:auto;max-height:58vh;object-fit:contain;border-radius:8px;background:#000';
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;justify-content:space-between;gap:8px;margin-top:8px;font-size:11px';
+        const label = document.createElement('span'); label.textContent = 'PC SCREEN · captured just now';
+        const save = document.createElement('a'); save.href = url; save.download = 'ORI-PC-Screen.jpg'; save.textContent = 'SAVE IMAGE'; save.style.color = 'var(--accent)';
+        actions.append(label, save); card.append(img, actions);
+        document.getElementById('feed').appendChild(card);
+        document.getElementById('feed').scrollTop = document.getElementById('feed').scrollHeight;
+        toast('PC screenshot captured');
+      } catch (error) {
+        sys('Could not capture PC screen: ' + String(error.message || error));
+      } finally {
+        if (button) { button.disabled = false; button.textContent = 'PC SCREEN'; }
+      }
+    }
+
+    // ── ORI 3.5.0 remote control transport ───────────────────────────────────────
+    const remoteTabs = Array.from(document.querySelectorAll('[data-remote-tab]'));
+    const remoteViews = {
+      touchpad: document.getElementById('remote-view-touchpad'),
+      screen: document.getElementById('remote-view-screen'),
+      quick: document.getElementById('remote-view-quick'),
+      'phone-share': document.getElementById('remote-view-phone-share')
+    };
+    let activeRemoteView = 'touchpad';
+    let controlSocket = null;
+    let desktopScreenSocket = null;
+    let desktopScreenObjectUrl = null;
+    let phoneScreenSocket = null;
+    let phoneScreenStream = null;
+    let phoneScreenTimer = null;
+    let phoneScreenCanvas = null;
+    let phoneScreenContext = null;
+    let pointerSpeed = Number(localStorage.getItem('ori.pointerSpeed') || 1.2);
+    let scrollSpeed = Number(localStorage.getItem('ori.scrollSpeed') || 1.2);
+
+    function selectRemoteView(name) {
+      activeRemoteView = name;
+      remoteTabs.forEach(btn => btn.classList.toggle('active', btn.dataset.remoteTab === name));
+      Object.entries(remoteViews).forEach(([key, panel]) => panel.classList.toggle('active', key === name));
+      if (name === 'screen') startDesktopScreen();
+      else stopDesktopScreen();
+    }
+    remoteTabs.forEach(btn => btn.addEventListener('click', () => selectRemoteView(btn.dataset.remoteTab)));
+
+    function _openControlSocket() {
+      if (controlSocket && (controlSocket.readyState === WebSocket.OPEN || controlSocket.readyState === WebSocket.CONNECTING)) return;
+      controlSocket = new WebSocket(`${_wsProto}://${location.host}/ws/control?token=${encodeURIComponent(_authToken)}`);
+      const status = document.getElementById('control-connection');
+      status.textContent = 'CONNECTING';
+      controlSocket.onopen = () => { status.textContent = 'CONNECTED'; status.style.color = 'var(--green)'; };
+      controlSocket.onclose = () => { status.textContent = 'RECONNECTING'; status.style.color = 'var(--muted)'; setTimeout(_openControlSocket, 1800); };
+      controlSocket.onerror = () => { status.textContent = 'OFFLINE'; status.style.color = '#ff8a93'; };
+      controlSocket.onmessage = event => {
+        try { const message = JSON.parse(event.data); if (!message.ok && message.error) toast(message.error); } catch (_) {}
+      };
+    }
+    _openControlSocket();
+
+    function sendPointerAction(payload) {
+      if (!controlSocket || controlSocket.readyState !== WebSocket.OPEN) { toast('PC control is reconnecting'); return; }
+      controlSocket.send(JSON.stringify(payload));
+    }
+    function sendQuickAction(action, name, percent, text) {
+      const payload = {action};
+      if (name) payload.name = name;
+      if (Number.isFinite(percent)) payload.percent = percent;
+      if (typeof text === 'string') payload.text = text;
+      return _authFetch('/api/remote/action', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      }).then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) throw new Error(data.error || 'Action failed');
+        return data;
+      });
+    }
+
+    // One-finger relative movement, tap to click, two-finger scroll and two-finger tap/right click.
+    const touchpad = document.getElementById('touchpad');
+    const activePointers = new Map();
+    let touchGesture = {moved:false, startX:0, startY:0, lastX:0, lastY:0, twoFinger:false, startTime:0};
+    const speedInput = document.getElementById('pointer-speed');
+    const scrollInput = document.getElementById('scroll-speed');
+    const speedValue = document.getElementById('pointer-speed-value');
+    const scrollValue = document.getElementById('scroll-speed-value');
+    speedInput.value = String(pointerSpeed); scrollInput.value = String(scrollSpeed);
+    speedValue.textContent = `${pointerSpeed.toFixed(1)}×`; scrollValue.textContent = `${scrollSpeed.toFixed(1)}×`;
+    speedInput.addEventListener('input', () => { pointerSpeed = Number(speedInput.value); speedValue.textContent = `${pointerSpeed.toFixed(1)}×`; localStorage.setItem('ori.pointerSpeed', pointerSpeed); });
+    scrollInput.addEventListener('input', () => { scrollSpeed = Number(scrollInput.value); scrollValue.textContent = `${scrollSpeed.toFixed(1)}×`; localStorage.setItem('ori.scrollSpeed', scrollSpeed); });
+
+    function _centroid() {
+      const pts = Array.from(activePointers.values());
+      if (!pts.length) return null;
+      return {x: pts.reduce((a,p)=>a+p.x,0)/pts.length, y: pts.reduce((a,p)=>a+p.y,0)/pts.length};
+    }
+    touchpad.addEventListener('pointerdown', event => {
+      event.preventDefault(); touchpad.setPointerCapture(event.pointerId);
+      activePointers.set(event.pointerId, {x:event.clientX, y:event.clientY, lastX:event.clientX, lastY:event.clientY});
+      if (activePointers.size === 1) {
+        touchGesture = {moved:false, startX:event.clientX, startY:event.clientY, lastX:event.clientX, lastY:event.clientY, twoFinger:false, startTime:performance.now()};
+      } else if (activePointers.size === 2) {
+        touchGesture.twoFinger = true;
+        const c = _centroid(); touchGesture.startX=c.x; touchGesture.startY=c.y; touchGesture.lastX=c.x; touchGesture.lastY=c.y;
+      }
+      touchpad.classList.add('dragging');
+    }, {passive:false});
+    touchpad.addEventListener('pointermove', event => {
+      if (!activePointers.has(event.pointerId)) return;
+      event.preventDefault();
+      const pointer = activePointers.get(event.pointerId);
+      const dx = event.clientX - pointer.lastX;
+      const dy = event.clientY - pointer.lastY;
+      pointer.x = event.clientX; pointer.y = event.clientY; pointer.lastX = event.clientX; pointer.lastY = event.clientY;
+      if (touchGesture.twoFinger) {
+        if (activePointers.size >= 2) {
+          const c = _centroid();
+          const delta = c.y - touchGesture.lastY;
+          if (Math.abs(delta) > 1) sendPointerAction({action:'scroll', amount:Math.round(-delta * scrollSpeed / 8)});
+          if (Math.abs(c.x-touchGesture.startX)+Math.abs(c.y-touchGesture.startY)>8) touchGesture.moved=true;
+          touchGesture.lastX=c.x; touchGesture.lastY=c.y;
+        }
+      } else {
+        if (Math.abs(dx)+Math.abs(dy)>2) touchGesture.moved=true;
+        sendPointerAction({action:'move', dx:Math.round(dx*pointerSpeed), dy:Math.round(dy*pointerSpeed)});
+      }
+    }, {passive:false});
+    function _endPointer(event) {
+      if (!activePointers.has(event.pointerId)) return;
+      const wasTwo = touchGesture.twoFinger || activePointers.size >= 2;
+      const moved = touchGesture.moved;
+      const duration = performance.now() - touchGesture.startTime;
+      activePointers.delete(event.pointerId);
+      if (activePointers.size === 0) {
+        touchpad.classList.remove('dragging');
+        if (!moved && duration < 320) sendPointerAction({action:'click', button:wasTwo?'right':'left'});
+        touchGesture.twoFinger=false;
+      } else if (activePointers.size === 1) {
+        const remain = Array.from(activePointers.values())[0];
+        touchGesture.twoFinger = true;
+        touchGesture.lastX = remain.x; touchGesture.lastY = remain.y;
+      }
+    }
+    touchpad.addEventListener('pointerup', _endPointer, {passive:false});
+    touchpad.addEventListener('pointercancel', _endPointer, {passive:false});
+    touchpad.addEventListener('contextmenu', e => e.preventDefault());
+    touchpad.addEventListener('wheel', e => { e.preventDefault(); sendPointerAction({action:'scroll', amount:Math.round(-e.deltaY*scrollSpeed/35)}); }, {passive:false});
+    document.getElementById('left-click').addEventListener('click', () => sendPointerAction({action:'click', button:'left'}));
+    document.getElementById('right-click').addEventListener('click', () => sendPointerAction({action:'click', button:'right'}));
+    document.querySelectorAll('[data-key]').forEach(button => button.addEventListener('click', () => sendPointerAction({action:'press', key:button.dataset.key})));
+    document.querySelectorAll('[data-hotkey]').forEach(button => button.addEventListener('click', () => sendPointerAction({action:'hotkey', keys:button.dataset.hotkey.split('+')})));
+
+    // PC media/system controls.
+    document.querySelectorAll('[data-media]').forEach(button => button.addEventListener('click', async () => {
+      try { await sendQuickAction('media', button.dataset.media); toast('PC media control sent'); }
+      catch (error) { sys(error.message || 'PC media control failed'); }
+    }));
+    document.querySelectorAll('[data-system]').forEach(button => button.addEventListener('click', async () => {
+      const name = button.dataset.system;
+      if (name === 'lock_pc' && !confirm('Lock the connected PC now?')) return;
+      try { await sendQuickAction('system', name); toast('PC action completed'); }
+      catch (error) { sys(error.message || 'PC action failed'); }
+    }));
+    const pcVolume = document.getElementById('pc-volume');
+    const pcVolumeValue = document.getElementById('pc-volume-value');
+    let pcVolumeTimer = null;
+    pcVolume.addEventListener('input', () => {
+      pcVolumeValue.textContent = `${pcVolume.value}%`;
+      clearTimeout(pcVolumeTimer);
+      pcVolumeTimer = setTimeout(async () => {
+        try { await sendQuickAction('volume', null, Number(pcVolume.value)); }
+        catch (error) { toast(error.message || 'PC volume control unavailable'); }
+      }, 180);
+    });
+    const pcTypeText = document.getElementById('pc-type-text');
+    async function sendPcText() {
+      const text = pcTypeText.value;
+      if (!text) return;
+      try {
+        await sendQuickAction('type_text', null, undefined, text);
+        pcTypeText.value = '';
+        toast('Text sent to focused PC app');
+      } catch (error) { toast(error.message || 'Could not type on PC'); }
+    }
+    document.getElementById('pc-type-send').addEventListener('click', sendPcText);
+    pcTypeText.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); sendPcText(); } });
+    document.getElementById('pc-mic-toggle').addEventListener('click', toggleDesktopMute);
+    document.getElementById('pc-stop-voice').addEventListener('click', interruptVoice);
+    document.getElementById('revoke-phone').addEventListener('click', async () => {
+      if (!confirm('Revoke all remembered ORI phone pairings?')) return;
+      try {
+        const response = await _authFetch('/api/revoke-devices', {method:'POST'});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not revoke devices');
+        toast(`Revoked ${data.revoked} remembered device(s)`);
+        localStorage.removeItem('jarvis_device_token');
+      } catch (error) { sys(error.message || 'Device revoke failed'); }
+    });
+
+    // Low-latency PC screen preview: authenticated JPEG frames over local WebSocket.
+    const pcScreenToggle = document.getElementById('pc-screen-toggle');
+    const pcScreenStatus = document.getElementById('pc-screen-status');
+    const pcScreenImage = document.getElementById('pc-screen-view');
+    const pcScreenEmpty = document.querySelector('#pc-screen-frame .screen-empty');
+    function startDesktopScreen() {
+      if (desktopScreenSocket && (desktopScreenSocket.readyState===WebSocket.OPEN || desktopScreenSocket.readyState===WebSocket.CONNECTING)) return;
+      const socket = new WebSocket(`${_wsProto}://${location.host}/ws/desktop-screen?token=${encodeURIComponent(_authToken)}&fps=6`);
+      socket.binaryType = 'blob'; desktopScreenSocket = socket;
+      pcScreenToggle.textContent = 'CONNECTING…'; pcScreenStatus.textContent = 'CONNECTING';
+      socket.onopen = () => { pcScreenToggle.textContent = '■ STOP LIVE VIEW'; pcScreenStatus.textContent = 'LIVE'; pcScreenStatus.style.color='var(--green)'; };
+      socket.onmessage = event => {
+        if (typeof event.data === 'string') {
+          try { const message=JSON.parse(event.data); if(message.type==='screen_error') sys(message.message); } catch (_) {}
+          return;
+        }
+        const url = URL.createObjectURL(event.data);
+        const old = desktopScreenObjectUrl; desktopScreenObjectUrl = url;
+        pcScreenImage.src = url; pcScreenImage.hidden = false; pcScreenEmpty.hidden = true;
+        if (old) URL.revokeObjectURL(old);
+      };
+      socket.onclose = () => {
+        if (desktopScreenSocket === socket) desktopScreenSocket = null;
+        pcScreenToggle.textContent = '▶ START LIVE VIEW';
+        pcScreenStatus.textContent = 'OFFLINE'; pcScreenStatus.style.color='var(--muted)';
+      };
+      socket.onerror = () => { pcScreenStatus.textContent = 'ERROR'; };
+    }
+    function stopDesktopScreen() {
+      if (desktopScreenSocket) { const socket=desktopScreenSocket; desktopScreenSocket=null; if(socket.readyState<2) socket.close(); }
+      pcScreenToggle.textContent = '▶ START LIVE VIEW';
+      pcScreenStatus.textContent = 'OFFLINE'; pcScreenStatus.style.color='var(--muted)';
+    }
+    pcScreenToggle.addEventListener('click', () => {
+      if (desktopScreenSocket && desktopScreenSocket.readyState < 2) stopDesktopScreen();
+      else startDesktopScreen();
+    });
+    document.getElementById('pc-screen-shot').addEventListener('click', captureDesktopScreen);
+
+    // Phone screen share. Browser capability is feature-detected; Android Chrome
+    // currently does not implement getDisplayMedia, so a native companion is needed there.
+    const phoneShareStart = document.getElementById('phone-share-start');
+    const phoneShareStop = document.getElementById('phone-share-stop');
+    const phoneShareStatus = document.getElementById('phone-share-status');
+    const phoneShareIndicator = document.getElementById('phone-share-indicator');
+    const phoneScreenPreview = document.getElementById('phone-screen-preview');
+    function _setPhoneShareStatus(text, kind='') {
+      phoneShareStatus.textContent = text; phoneShareStatus.className = 'share-status ' + kind;
+      phoneShareIndicator.textContent = kind === 'ready' ? 'SHARING' : (kind === 'error' ? 'UNAVAILABLE' : 'OFF');
+      phoneShareIndicator.style.color = kind === 'ready' ? 'var(--green)' : (kind === 'error' ? '#ff8a93' : 'var(--muted)');
+    }
+    async function startPhoneScreenShare() {
+      if (!window.isSecureContext) {
+        _setPhoneShareStatus('HTTPS / TRUSTED LOCAL CERTIFICATE REQUIRED', 'error');
+        return;
+      }
+      if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
+        _setPhoneShareStatus('THIS BROWSER CANNOT SHARE THE FULL PHONE SCREEN. USE THE NATIVE ORI ANDROID COMPANION.', 'error');
+        return;
+      }
+      try {
+        phoneScreenStream = await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:2,max:3},width:{ideal:1280}},audio:false});
+        phoneScreenPreview.srcObject = phoneScreenStream; phoneScreenPreview.style.display='block';
+        await phoneScreenPreview.play();
+        phoneScreenSocket = new WebSocket(`${_wsProto}://${location.host}/ws/phone-screen?token=${encodeURIComponent(_authToken)}`);
+        phoneScreenSocket.binaryType = 'arraybuffer';
+        phoneScreenSocket.onopen = () => {
+          const track = phoneScreenStream.getVideoTracks()[0];
+          const settings = track && track.getSettings ? track.getSettings() : {};
+          const w = Math.min(960, settings.width || 960), h = Math.max(1, Math.round(w * (settings.height || 540) / (settings.width || 960)));
+          phoneScreenCanvas = document.createElement('canvas'); phoneScreenCanvas.width=w; phoneScreenCanvas.height=h;
+          phoneScreenContext = phoneScreenCanvas.getContext('2d', {alpha:false});
+          phoneScreenTimer = setInterval(() => {
+            if (!phoneScreenSocket || phoneScreenSocket.readyState!==WebSocket.OPEN || !phoneScreenPreview.videoWidth) return;
+            phoneScreenContext.drawImage(phoneScreenPreview,0,0,w,h);
+            phoneScreenCanvas.toBlob(blob => { if(blob && phoneScreenSocket && phoneScreenSocket.readyState===WebSocket.OPEN) blob.arrayBuffer().then(buf=>phoneScreenSocket.send(buf)); }, 'image/jpeg', 0.48);
+          }, 900);
+          _setPhoneShareStatus('SCREEN SHARING · FRAMES STAY IN MEMORY UNTIL ORI CLOSES', 'ready');
+          phoneShareStart.disabled=true; phoneShareStop.disabled=false;
+        };
+        phoneScreenSocket.onmessage = event => {
+          if(typeof event.data==='string') {
+            try { const msg=JSON.parse(event.data); if(msg.type==='frame_rejected') _setPhoneShareStatus(msg.message,'error'); } catch (_) {}
+          }
+        };
+        phoneScreenSocket.onerror = () => _setPhoneShareStatus('SCREEN SHARE CONNECTION FAILED', 'error');
+        phoneScreenStream.getVideoTracks()[0].addEventListener('ended', stopPhoneScreenShare, {once:true});
+      } catch (error) {
+        _setPhoneShareStatus(`SCREEN SHARE NOT STARTED · ${error.name || 'PERMISSION DENIED'}`, 'error');
+        stopPhoneScreenShare();
+      }
+    }
+    function stopPhoneScreenShare() {
+      if(phoneScreenTimer) { clearInterval(phoneScreenTimer); phoneScreenTimer=null; }
+      if(phoneScreenSocket) { const socket=phoneScreenSocket; phoneScreenSocket=null; if(socket.readyState<2) socket.close(); }
+      if(phoneScreenStream) { phoneScreenStream.getTracks().forEach(track=>track.stop()); phoneScreenStream=null; }
+      phoneScreenPreview.srcObject=null; phoneScreenPreview.style.display='none';
+      phoneShareStart.disabled=false; phoneShareStop.disabled=true;
+      _setPhoneShareStatus('OFF · SHARE ONLY WHEN YOU CHOOSE');
+    }
+    phoneShareStart.addEventListener('click', startPhoneScreenShare);
+    phoneShareStop.addEventListener('click', stopPhoneScreenShare);
+    document.getElementById('phone-screen-analyze').addEventListener('click', async () => {
+      try {
+        const response = await _authFetch('/api/phone-screen/analyze', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:'Look at the shared phone screen and describe what is visible. Help me with the current screen.'})});
+        const data = await response.json();
+        if(!response.ok || !data.ok) throw new Error(data.error || 'No shared frame available');
+        toast('Phone screen sent to ORI');
+        sys('Phone screen frame sent to ORI for visual analysis.');
+      } catch(error) { _setPhoneShareStatus(error.message || 'Could not send screen to ORI', 'error'); }
+    });
+
+    document.getElementById('android-companion-code').addEventListener('click', async () => {
+      const button = document.getElementById('android-companion-code');
+      const view = document.getElementById('android-companion-code-view');
+      button.disabled = true; button.textContent = 'CREATING CODE…';
+      try {
+        const response = await _authFetch('/api/companion/create-code', {method:'POST'});
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || 'Could not create companion code');
+        view.hidden = false;
+        view.className = 'share-status ready';
+        view.textContent = `ANDROID COMPANION CODE: ${data.code} · EXPIRES IN 5 MINUTES`;
+        toast('Companion pairing code created');
+      } catch (error) {
+        view.hidden = false; view.className = 'share-status error'; view.textContent = error.message || 'Companion pairing failed';
+      } finally {
+        button.disabled = false; button.textContent = 'PAIR ANDROID SCREEN COMPANION';
+      }
+    });
+    async function _refreshPhoneScreenStatus() {
+      try {
+        const response = await _authFetch('/api/phone-screen/status', {cache:'no-store'});
+        const data = await response.json();
+        if (response.ok && data.shared && !phoneScreenStream) {
+          _setPhoneShareStatus(`PHONE SCREEN READY · FRAME ${Math.round(data.age_seconds)}s AGO`, 'ready');
+        }
+      } catch (_) {}
+    }
+    setInterval(_refreshPhoneScreenStatus, 2500);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { stopDesktopScreen(); }
+    });
+
+    // ── Commands ──────────────────────────────────────────────────────────────
+    function doSend() {
+      const inp = document.getElementById('inp');
+      const txt = inp.value.trim();
+      if (!txt) return;
+      inp.value = '';
+      append('user', txt);
+      const enc  = _encrypt(txt);
+      const body = enc ? { enc } : { text: txt };
+      _authFetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    }
+
+    function doWake() {
+      sys('Sending wake signal…');
+      _authFetch('/api/wake', { method: 'POST' });
+    }
+
+    document.getElementById('inp').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
+    });
+
+    // ── Toast ─────────────────────────────────────────────────────────────────
+    let _toastTimer;
+    function toast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('show');
+      clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+    }
+
+    // ── Real-time Voice — PCM16 WebSocket → Gemini Live ──────────────────────
+    const micBtn  = document.getElementById('mic-btn');
+    let _voiceWs  = null;
+    let _audioCtx = null;
+    let _micStm   = null;
+    let _audioNd  = null;
+
+    function _micIdle() {
+      micBtn.innerHTML = '🎤';
+      micBtn.title     = 'Voice — tap to speak';
+      micBtn.classList.remove('recording');
+    }
+
+    // Float32 PCM → resample to 16 kHz + convert to Int16
+    function _f32toPcm16(f32, srcRate) {
+      let s = f32;
+      if (srcRate !== 16000) {
+        const ratio = srcRate / 16000;
+        const len   = Math.round(f32.length / ratio);
+        s = new Float32Array(len);
+        for (let i = 0; i < len; i++)
+          s[i] = f32[Math.min(Math.round(i * ratio), f32.length - 1)];
+      }
+      const out = new Int16Array(s.length);
+      for (let i = 0; i < s.length; i++)
+        out[i] = Math.max(-32768, Math.min(32767, Math.round(s[i] * 32768)));
+      return out.buffer;
+    }
+
+    function _showVoiceSetup() {
+      if (document.getElementById('voice-setup')) return; // show once
+      const origin = location.origin;
+      const card = document.createElement('div');
+      card.id = 'voice-setup';
+      card.style.cssText = [
+        'align-self:stretch', 'background:rgba(67,255,145,0.06)',
+        'border:1px solid rgba(67,255,145,0.22)', 'border-radius:14px',
+        'padding:16px 18px', 'font-size:13px', 'line-height:1.8',
+        'animation:pop 0.18s ease'
+      ].join(';');
+      card.innerHTML =
+        '<div style="font-weight:700;color:#43ff91;letter-spacing:.5px;margin-bottom:10px">🎤 One-time voice setup</div>' +
+        '<ol style="padding-left:18px;color:#8899aa;margin:0;display:flex;flex-direction:column;gap:4px">' +
+        '<li>Open a new tab → go to <span style="background:rgba(255,255,255,0.07);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:12px">chrome://flags</span></li>' +
+        '<li>Search: <strong style="color:#dde3ed">Insecure origins treated as secure</strong></li>' +
+        '<li>Paste this URL into the box:<br><span id="flags-url" style="background:rgba(255,255,255,0.07);padding:2px 8px;border-radius:4px;font-family:monospace;font-size:11px;user-select:all;cursor:pointer">' + esc(origin) + '</span></li>' +
+        '<li>Set to <strong style="color:#22c55e">Enabled</strong> → tap <strong style="color:#dde3ed">Relaunch</strong></li>' +
+        '<li>Return here and tap 🎤</li>' +
+        '</ol>';
+      feed.appendChild(card);
+      feed.scrollTop = feed.scrollHeight;
+      // tap to copy
+      card.querySelector('#flags-url').addEventListener('click', () => {
+        navigator.clipboard?.writeText(origin).then(() => toast('URL copied!')).catch(() => {});
+      });
+    }
+
+    async function doMic() {
+      if (_voiceWs) { _stopVoice(); return; }
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        _showVoiceSetup();
+        return;
+      }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        });
+      } catch (e) {
+        sys(e.name === 'NotAllowedError'
+          ? 'Microphone denied — tap the address bar lock and allow microphone.'
+          : 'Mic error: ' + e.message);
+        return;
+      }
+
+      // 16 kHz context (fall back to native rate — _f32toPcm16 resamples)
+      let ctx;
+      try { ctx = new AudioContext({ sampleRate: 16000 }); }
+      catch (_) { ctx = new AudioContext(); }
+      if (ctx.state === 'suspended') await ctx.resume();
+
+      const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(
+        `${wsProto}://${location.host}/ws/phone-audio?token=${encodeURIComponent(_authToken)}`
+      );
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = async () => {
+        const rate = ctx.sampleRate;
+        const src  = ctx.createMediaStreamSource(stream);
+        _phoneAnalyser = ctx.createAnalyser();
+        _phoneAnalyser.fftSize = 2048;
+        _phoneFrequencyData = new Uint8Array(_phoneAnalyser.frequencyBinCount);
+        const analyserSilence = ctx.createGain(); analyserSilence.gain.value = 0;
+        src.connect(_phoneAnalyser); _phoneAnalyser.connect(analyserSilence); analyserSilence.connect(ctx.destination);
+
+        // AudioWorklet (modern) — runs in dedicated audio thread
+        const wCode = `class J extends AudioWorkletProcessor{process(i){const c=i[0]?.[0];if(c)this.port.postMessage(c.slice());return true;}}registerProcessor('j',J);`;
+        try {
+          const burl = URL.createObjectURL(new Blob([wCode], { type: 'application/javascript' }));
+          await ctx.audioWorklet.addModule(burl);
+          URL.revokeObjectURL(burl);
+          const nd = new AudioWorkletNode(ctx, 'j');
+          // Keep the worklet alive but never monitor the phone mic through the speaker.
+          const silent = ctx.createGain(); silent.gain.value = 0;
+          nd.connect(silent); silent.connect(ctx.destination);
+          // Buffer to 1024 samples (64 ms at 16 kHz) before sending —
+          // matches PC mic chunk size, prevents queue flooding on the server.
+          let _pbuf = [], _plen = 0;
+          nd.port.onmessage = e => {
+            const floats = e.data;
+            let sumSq = 0;
+            for (let i = 0; i < floats.length; i++) sumSq += floats[i] * floats[i];
+            _phoneInputLevel = _phoneMuted ? 0 : Math.min(1, Math.sqrt(sumSq / Math.max(1, floats.length)) * 4);
+            _phoneInputAt = performance.now();
+            const chunk = new Int16Array(_f32toPcm16(floats, rate));
+            _pbuf.push(chunk); _plen += chunk.length;
+            if (_plen >= 1024) {
+              const out = new Int16Array(_plen); let off = 0;
+              for (const c of _pbuf) { out.set(c, off); off += c.length; }
+              if (ws.readyState === 1) ws.send(_phoneMuted ? new Int16Array(out.length).buffer : out.buffer);
+              _pbuf = []; _plen = 0;
+            }
+          };
+          src.connect(nd);
+          _audioNd = nd;
+        } catch (_) {
+          // ScriptProcessor fallback (deprecated, still works everywhere)
+          const sp = ctx.createScriptProcessor(4096, 1, 1);
+          const silent = ctx.createGain(); silent.gain.value = 0;
+          sp.connect(silent); silent.connect(ctx.destination);
+          sp.onaudioprocess = e => {
+            const floats = e.inputBuffer.getChannelData(0);
+            let sumSq = 0;
+            for (let i = 0; i < floats.length; i++) sumSq += floats[i] * floats[i];
+            _phoneInputLevel = _phoneMuted ? 0 : Math.min(1, Math.sqrt(sumSq / Math.max(1, floats.length)) * 4);
+            _phoneInputAt = performance.now();
+            const pcm = _f32toPcm16(floats, rate);
+            if (ws.readyState === 1) ws.send(_phoneMuted ? new ArrayBuffer(pcm.byteLength) : pcm);
+          };
+          src.connect(sp);
+          _audioNd = sp;
+        }
+
+        micBtn.innerHTML = '⏹';
+        micBtn.title     = 'Tap to stop';
+        micBtn.classList.add('recording');
+        micStateEl.textContent = _phoneMuted ? 'PHONE MIC MUTED' : 'PHONE MIC ON';
+        sys(_phoneMuted ? 'Voice session live — phone mic is muted.' : 'Voice live — speak now');
+        toast('🎤 Live');
+      };
+
+      ws.onclose = () => { _stopVoice(); };
+      ws.onerror = () => { sys('Voice connection failed.'); _stopVoice(); };
+
+      _voiceWs  = ws;
+      _audioCtx = ctx;
+      _micStm   = stream;
+    }
+
+    function _stopVoice() {
+      if (_audioNd)  { try { _audioNd.disconnect(); }  catch (_) {}; _audioNd  = null; }
+      if (_audioCtx) { try { _audioCtx.close(); }      catch (_) {}; _audioCtx = null; }
+      if (_micStm)   { _micStm.getTracks().forEach(t => t.stop()); _micStm = null; }
+      if (_voiceWs)  {
+        const w = _voiceWs; _voiceWs = null;
+        if (w.readyState < 2) w.close();
+      }
+      _phoneInputLevel = 0;
+      _micIdle();
+    }
+  </script>
+</body>
+</html>
