@@ -16,6 +16,10 @@ This writes `THIRD_PARTY_LICENSES.generated.md` using the installed Python packa
 
 Key integrations include PyQt6, Google Gen AI SDK, FastAPI/Uvicorn, Requests, Playwright, WebRTC VAD, PyAutoGUI, Pillow, OpenCV, psutil, qrcode, cryptography and pywin32. Each retains its own copyright and license.
 
+## Bundled browser dependency
+
+- `dashboard/static/crypto-js.js`: CryptoJS 4.2.0 browser bundle from the official `brix/crypto-js` 4.2.0 source release. Licensed under MIT. Copyright (c) 2009-2013 Jeff Mott and Copyright (c) 2013-2016 Evan Vosberg. The complete license is included beside the asset as `dashboard/static/crypto-js-LICENSE.txt`.
+
 ## Assets
 
 - `config/ori.ico`: ORI project icon asset retained from the supplied archive.
