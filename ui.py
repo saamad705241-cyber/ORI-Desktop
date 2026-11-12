@@ -3989,6 +3989,7 @@ class MainWindow(QMainWindow):
         self._home_mute_btn.setToolTip("Toggle microphone mute (F4)")
         self._home_mute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._home_mute_btn.setFont(QFont(UI_FONT, 8, QFont.Weight.Bold))
+        self._style_mute_btn()
         self._home_mute_btn.clicked.connect(self._toggle_mute)
         controls.addWidget(self._home_mute_btn)
 

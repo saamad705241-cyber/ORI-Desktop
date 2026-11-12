@@ -10,6 +10,9 @@ import platform
 from typing import Any, Callable
 
 
+_PENDING_REQUESTS: dict[int, dict[str, Any]] = {}
+
+
 def _position_payload(position: Any) -> dict[str, Any]:
     coordinate = position.coordinate
     point = coordinate.point.position
@@ -63,6 +66,12 @@ def request_location_access(callback: Callable[[dict[str, Any]], None]) -> bool:
         })
         return False
 
+    request_id = id(access_operation)
+    _PENDING_REQUESTS[request_id] = {
+        "access_operation": access_operation,
+        "locator": locator,
+    }
+
     def position_completed(operation: Any, _status: Any) -> None:
         try:
             deliver(_position_payload(operation.get_results()))
@@ -72,11 +81,14 @@ def request_location_access(callback: Callable[[dict[str, Any]], None]) -> bool:
                 "reason": "position_unavailable",
                 "error": f"Windows could not determine the device location: {type(exc).__name__}: {exc}",
             })
+        finally:
+            _PENDING_REQUESTS.pop(request_id, None)
 
     def access_completed(operation: Any, _status: Any) -> None:
         try:
             access = operation.get_results()
         except Exception as exc:
+            _PENDING_REQUESTS.pop(request_id, None)
             deliver({
                 "ok": False,
                 "reason": "permission_error",
@@ -85,6 +97,7 @@ def request_location_access(callback: Callable[[dict[str, Any]], None]) -> bool:
             return
 
         if access != GeolocationAccessStatus.ALLOWED:
+            _PENDING_REQUESTS.pop(request_id, None)
             deliver({
                 "ok": False,
                 "reason": "denied",
@@ -94,8 +107,10 @@ def request_location_access(callback: Callable[[dict[str, Any]], None]) -> bool:
 
         try:
             position_operation = locator.get_geoposition_async()
+            _PENDING_REQUESTS[request_id]["position_operation"] = position_operation
             position_operation.completed = position_completed
         except Exception as exc:
+            _PENDING_REQUESTS.pop(request_id, None)
             deliver({
                 "ok": False,
                 "reason": "position_unavailable",
@@ -105,6 +120,7 @@ def request_location_access(callback: Callable[[dict[str, Any]], None]) -> bool:
     try:
         access_operation.completed = access_completed
     except Exception as exc:
+        _PENDING_REQUESTS.pop(request_id, None)
         deliver({
             "ok": False,
             "reason": "permission_error",

@@ -156,4 +156,5 @@ def test_hardware_inventory_action_returns_json():
     assert "processors" in data
     assert "memory" in data
     assert "graphics" in data
+    assert "cpu_thermal" in data
     assert "storage" in data
