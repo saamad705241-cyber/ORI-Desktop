@@ -23,6 +23,30 @@ declare a final release until the acceptance checks in the final phases pass.
       AMD Radeon Graphics, NVIDIA GeForce RTX 4050 Laptop GPU, FA607NUQ
       motherboard, KIOXIA 512 GB SSD, Windows 11 build 26300.
 
+## Next-session P0: Action execution reliability (new critical bug)
+
+**Reported 2026-11-13. This is the first task when development resumes.**
+
+- [ ] Investigate false success confirmations: ORI says an action completed even when
+      the real OS operation did not happen.
+- [ ] Reproduce with "Close Notepad" and verify whether the process/window actually closes.
+- [ ] Trace the complete tool path: model tool call, action handler, OS command,
+      operation result, postcondition and spoken response.
+- [ ] Audit generic success fallbacks (including empty handler results), swallowed
+      exceptions, timeouts, rejected/blocked actions and unverified operations.
+- [ ] Require structured action results with explicit success/failure, details and
+      verification state.
+- [ ] Verify real postconditions where practical before speaking success.
+- [ ] On failure or uncertainty, report the actual outcome and next required step.
+- [ ] Add regression tests for app-close and representative computer-control actions,
+      covering success, failed operation, timeout, permission denied and unverified state.
+- [ ] Preserve existing working actions, voice interaction and interruption behavior.
+
+Tracking issue: https://github.com/saamad705241-cyber/ORI-Desktop/issues/5
+
+**Priority order:** Fix and validate this P0 issue first. Then resume the in-progress
+Hardware Intelligence phase. Packaged Phone Remote remains deferred as recorded below.
+
 ## Phase 1: Baseline and feature audit
 
 - [x] Verify the official repository and published baseline.
@@ -35,7 +59,7 @@ declare a final release until the acceptance checks in the final phases pass.
 
 ## Phase 2: Hardware intelligence
 
-- [ ] Add a read-only hardware inventory tool that ORI can invoke on demand.
+- [x] Add a read-only hardware inventory tool that ORI can invoke on demand (merged; 147 tests, Ruff, Gitleaks and Windows package validation passed).
 - [ ] Report exact laptop manufacturer and model.
 - [ ] Report CPU model, physical cores, logical threads and clock speeds.
 - [ ] Report installed RAM, available RAM and memory-module details.
