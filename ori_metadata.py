@@ -85,7 +85,7 @@ Available feature areas in this source
 
 Coming soon / not enabled in this build
 - Account sign-in and cloud profile synchronization.
-- GitHub release checking and checksum-verified package download are implemented; public release distribution remains inactive until the owner creates and configures the repository.
+- GitHub release checks, SHA-256 verification, staged Windows updates and automatic versioned GitHub releases are implemented. The final single-file installer remains a later phase.
 - Additional remote features are labelled as coming soon until their end-to-end tests pass.
 """
 

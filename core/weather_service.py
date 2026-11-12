@@ -13,7 +13,7 @@ import requests
 IP_LOCATION_URL = "https://ipapi.co/json/"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
-USER_AGENT = "ORI-Desktop-Assistant/3.1 (weather feature; user opt-in)"
+USER_AGENT = "ORI-Desktop/3.5.1 (weather feature; user opt-in)"
 TIMEOUT_SECONDS = 6
 
 WEATHER_CODES = {
