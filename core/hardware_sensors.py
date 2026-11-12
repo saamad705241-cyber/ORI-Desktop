@@ -12,7 +12,7 @@ from typing import Any
 
 LHM_DATA_URL = "http://127.0.0.1:8085/data.json"
 HTTP_TIMEOUT_SECONDS = 0.8
-_TEMP_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
+_TEMP_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
 
 
 def _number(value: Any) -> float | None:
@@ -25,7 +25,7 @@ def _number(value: Any) -> float | None:
         if not match:
             return None
         try:
-            parsed = float(match.group(1))
+            parsed = float(match.group(0).replace(",", "."))
         except (TypeError, ValueError, OverflowError):
             return None
     if 0.0 < parsed < 125.0:

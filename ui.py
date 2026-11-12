@@ -5083,6 +5083,11 @@ class MainWindow(QMainWindow):
     def _launch_location_weather_worker(
         self, latitude: float, longitude: float, accuracy_m: float | None
     ) -> None:
+        previous_cancel = getattr(self, "_location_cancel_event", None)
+        if previous_cancel is not None:
+            previous_cancel.set()
+        cancel_event = threading.Event()
+        self._location_cancel_event = cancel_event
         self._location_generation += 1
         generation = self._location_generation
 
@@ -5092,8 +5097,14 @@ class MainWindow(QMainWindow):
                     fetch_current_weather,
                     reverse_geocode_coordinates,
                 )
+                if cancel_event.is_set():
+                    return
                 location = reverse_geocode_coordinates(latitude, longitude)
+                if cancel_event.is_set():
+                    return
                 result = fetch_current_weather(location)
+                if cancel_event.is_set():
+                    return
                 result.update({
                     "ok": True,
                     "request_mode": "device",
@@ -5128,7 +5139,9 @@ class MainWindow(QMainWindow):
             self._set_weather_top_off("WX ERR", error)
             return
 
-        self._on_weather_result(result)
+        weather_result = dict(result)
+        weather_result["generation"] = self._weather_generation
+        self._on_weather_result(weather_result)
         accuracy = result.get("device_accuracy_m")
         if accuracy is not None:
             try:
@@ -5145,6 +5158,9 @@ class MainWindow(QMainWindow):
             )
 
     def _disable_device_location(self) -> None:
+        cancel_event = getattr(self, "_location_cancel_event", None)
+        if cancel_event is not None:
+            cancel_event.set()
         self._location_generation += 1
         self._location_request_inflight = False
         self._weather_write_config(

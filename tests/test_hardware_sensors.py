@@ -76,3 +76,17 @@ def test_lhm_json_rejects_out_of_range_sensor_values():
     }
 
     assert parse_lhm_cpu_temperature(payload) is None
+
+
+
+def test_lhm_json_supports_decimal_comma_sensor_values():
+    payload = {
+        "Text": "AMD Ryzen 7 170",
+        "Children": [
+            {"Text": "Core (Tctl/Tdie)", "Type": "Temperature", "Value": "46,9 °C"}
+        ],
+    }
+
+    reading = parse_lhm_cpu_temperature(payload)
+
+    assert reading["temperature_c"] == 46.9
