@@ -373,7 +373,7 @@ TOOL = {
         "Read the computer's actual hardware specifications. Use when the user asks "
         "which laptop or PC they have, the exact manufacturer/model, processor name, "
         "CPU cores or threads, installed RAM and memory modules, graphics cards, "
-        CPU temperature, GPU memory or temperature (when supported), motherboard, storage drives, 
+        "CPU temperature, GPU memory or temperature (when supported), motherboard, storage drives, "
         "Windows version/build, or screen resolution. This is read-only. Never guess "
         "a missing value; report null/unavailable when the hardware provider cannot "
         "read it. Serial numbers, MAC addresses, device IDs and product keys are not collected."

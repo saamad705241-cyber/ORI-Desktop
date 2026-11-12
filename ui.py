@@ -5048,6 +5048,7 @@ class MainWindow(QMainWindow):
                 "ok": False,
                 "reason": "unavailable",
                 "error": f"Could not start device location: {type(exc).__name__}: {exc}",
+                "request_generation": request_generation,
             })
 
     def _on_device_location_result(self, result: object) -> None:
