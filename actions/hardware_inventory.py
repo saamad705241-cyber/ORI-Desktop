@@ -246,13 +246,13 @@ def get_hardware_inventory() -> dict[str, Any]:
 
     try:
         virtual_memory = psutil.virtual_memory()
+        installed_memory_gb = wmi_data.get("installed_module_memory_gb")
+        if installed_memory_gb is None:
+            installed_memory_gb = wmi_data.get("system", {}).get("wmi_total_memory_gb")
+        if installed_memory_gb is None:
+            installed_memory_gb = round(virtual_memory.total / _GB, 2)
         memory_summary = {
-            "installed_gb": (
-                wmi_data.get("installed_module_memory_gb")
-                or _gb(wmi_data.get("system", {}).get("wmi_total_memory_gb") and
-                       float(wmi_data["system"]["wmi_total_memory_gb"]) * _GB)
-                or round(virtual_memory.total / _GB, 2)
-            ),
+            "installed_gb": installed_memory_gb,
             "available_gb": round(virtual_memory.available / _GB, 2),
             "used_gb": round(virtual_memory.used / _GB, 2),
             "usage_percent": round(virtual_memory.percent, 1),
