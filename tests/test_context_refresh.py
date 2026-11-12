@@ -72,7 +72,7 @@ class ContextRefreshTests(unittest.TestCase):
         self.assertEqual(svc._refresh_count, 1)
 
     
-def test_force_refresh_advances_next_due_ts(self):
+   def test_force_refresh_advances_next_due_ts(self):
     svc = self._make_service(interval=600)
 
     # Simulate an old scheduled deadline.
