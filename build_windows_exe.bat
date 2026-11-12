@@ -53,6 +53,9 @@ REM to the executable directory. Never bundle config/api_keys.json or user memor
   --collect-all pycaw ^
   --collect-all comtypes ^
   --collect-all mss ^
+  --collect-all wmi ^
+  --collect-all win32com ^
+  --collect-all pynvml ^
   --collect-submodules actions ^
   --collect-submodules core ^
   --collect-submodules plugins ^
@@ -67,6 +70,8 @@ REM to the executable directory. Never bundle config/api_keys.json or user memor
   --hidden-import uvicorn.protocols.websockets.auto ^
   --hidden-import uvicorn.lifespan.on ^
   --hidden-import multipart ^
+  --hidden-import pythoncom ^
+  --hidden-import pywintypes ^
   main.py
 if errorlevel 1 goto :fail
 
