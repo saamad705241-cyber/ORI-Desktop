@@ -1,28 +1,45 @@
-# Repository and release updates
+# Repository, versioning and automatic releases
 
-## Configure the official repository
+## Source of truth
 
-After creating the public/private GitHub repository, set `github_repository` in the local `config/api_keys.json` to `OWNER/REPOSITORY`. Do not put a GitHub token in this file. Public release checks use GitHub's public Releases API.
+- `ori_metadata.py` owns `APP_VERSION`.
+- The UI imports that same value. The updater also reads it from `ori_metadata.py`.
+- Never hardcode a separate application version in another module.
 
-## CI
+## Version policy
 
-`.github/workflows/ci.yml` runs Python compilation, tests, Ruff correctness checks and Gitleaks on pushes and pull requests.
+Use stable SemVer `MAJOR.MINOR.PATCH`:
 
-## Windows package validation
+- Bug fix / reliability fix: increment PATCH (for example, 3.5.0 → 3.5.1 → 3.5.2).
+- Backward-compatible feature group: increment MINOR and reset PATCH (for example, 3.5.2 → 3.6.0).
+- Breaking compatibility change: increment MAJOR and reset MINOR/PATCH (for example, 3.6.0 → 4.0.0).
 
-Every CI run builds the one-folder Windows application after tests and secret scanning pass.
-The package smoke test verifies `ORI.exe` plus the Phone Remote page, login page, bundled
-CryptoJS browser library and its MIT license. CI uploads the verified folder as a short-lived
-workflow artifact for manual testing. This validation artifact is not a published ORI release
-and does not change the in-app updater's latest-release channel.
+For every bug-fix update that is ready to publish, bump `APP_VERSION` in the same PR as the code fix. Do not bump the version for unfinished or failed changes.
 
-## Publishing a Windows release
+## Automatic release flow
 
-1. Verify the upstream and third-party license terms before distribution.
-2. Update `APP_VERSION` in `ori_metadata.py` and `APP_VERSION` in `ui.py`.
-3. Run the test suite and build `dist/ORI` on Windows.
-4. Commit and push; create a matching tag such as `v3.5.0`.
-5. `.github/workflows/release.yml` builds the one-folder Windows app, publishes `ORI-<version>-Windows.zip`, and publishes the matching `.sha256` sidecar.
-6. The in-app updater checks for the latest published release, downloads the ZIP and checksum, verifies SHA-256, and stages the package. Packaged Windows builds can schedule replacement after ORI closes. Source/development builds are never overwritten automatically.
+1. Code is edited directly in the GitHub repository on a dedicated branch. No repository ZIP download/upload is required for source changes.
+2. A PR is tested: compile, pytest, Ruff, Gitleaks and the Windows package smoke test.
+3. The PR is merged into `main`.
+4. The release workflow reads `APP_VERSION`, compares it to the latest GitHub Release and does nothing if the version has not increased.
+5. When the version is newer, GitHub Actions verifies the source again, builds the Windows one-folder app, creates `ORI-<version>-Windows.zip` and its SHA-256 sidecar, and publishes a release/tag `v<version>`.
+6. The existing ORI updater checks the latest GitHub Release, downloads the ZIP and checksum, verifies SHA-256, stages the update and installs/restarts the packaged Windows build.
 
-A repository URL is intentionally not guessed or hard-coded before the owner creates it.
+A normal merge that does not bump the version must not publish another release. Failed tests must never publish a release.
+
+## User's part
+
+For an already installed packaged ORI, the user does not need to download the repository or manually upload files. Once a verified release is published, the user uses ORI's existing About & Updates controls to check, download and install it. The updater requires internet access. Source/development runs do not automatically replace their own files.
+
+## CI and release workflow
+
+- `.github/workflows/ci.yml` runs compilation, tests, Ruff and Gitleaks, and produces a Windows package smoke-test artifact.
+- `.github/workflows/release.yml` publishes a new stable release after a successful main-branch merge only when `APP_VERSION` is newer than the latest stable GitHub Release.
+- Manual version tags remain supported, but the tag must match `APP_VERSION`.
+
+## Safety and release integrity
+
+- Do not publish incomplete changes or increment versions for failed fixes.
+- Keep user API keys and local memory out of releases.
+- The release ZIP contains the full app folder; the final single-file installer and uninstaller remain a separate last phase.
+- Verify third-party license and redistribution terms before public binary distribution.
