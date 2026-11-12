@@ -59,7 +59,7 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed `
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
 if (!(Test-Path "dist\ORI\ORI.exe")) { throw "Build completed but dist\ORI\ORI.exe is missing." }
-foreach ($asset in @("dashboard\static\app.html", "dashboard\static\login.html")) {
+foreach ($asset in @("dashboard\static\app.html", "dashboard\static\login.html", "dashboard\static\crypto-js.js", "dashboard\static\crypto-js-LICENSE.txt")) {
   if (!(Test-Path (Join-Path "dist\ORI" $asset))) {
     throw "Build is missing required Phone Remote asset: $asset"
   }
