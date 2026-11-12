@@ -82,6 +82,14 @@ if not exist "dist\ORI\dashboard\static\login.html" (
   echo ERROR: Phone Remote login.html was not bundled.
   goto :fail
 )
+if not exist "dist\ORI\dashboard\static\crypto-js.js" (
+  echo ERROR: Phone Remote CryptoJS dependency was not bundled.
+  goto :fail
+)
+if not exist "dist\ORI\dashboard\static\crypto-js-LICENSE.txt" (
+  echo ERROR: Phone Remote CryptoJS MIT license was not bundled.
+  goto :fail
+)
 if not exist "dist\ORI\config" mkdir "dist\ORI\config"
 if not exist "dist\ORI\config\api_keys.json" (
   copy /y "config\api_keys.example.json" "dist\ORI\config\api_keys.json" >nul
