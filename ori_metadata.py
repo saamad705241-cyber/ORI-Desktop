@@ -11,10 +11,10 @@ normal users cannot edit it through Settings.
 # ---------------------------------------------------------------------------
 
 APP_NAME = "ORI"
-APP_VERSION = "3.5.0"
+APP_VERSION = "3.5.1"
 APP_RELEASE_LABEL = f"ORI {APP_VERSION}"
 APP_MODEL_LABEL = f"ORI Core {'.'.join(APP_VERSION.split('.')[:2])}"  # Product/runtime identity, not a foundation-model claim.
-BUILD_DATE = "12 November 2026"
+BUILD_DATE = "13 November 2026"
 RELEASE_DATE = BUILD_DATE
 PLANNED_FINAL_RELEASE = "November 2026"
 RELEASE_STATUS = "Final integration candidate; Windows, microphone and live-service verification required before public release"
@@ -85,7 +85,7 @@ Available feature areas in this source
 
 Coming soon / not enabled in this build
 - Account sign-in and cloud profile synchronization.
-- GitHub release checking and checksum-verified package download are implemented; public release distribution remains inactive until the owner creates and configures the repository.
+- GitHub release checks, SHA-256 verification, staged Windows updates and automatic versioned GitHub releases are implemented. The final single-file installer remains a later phase.
 - Additional remote features are labelled as coming soon until their end-to-end tests pass.
 """
 
@@ -165,7 +165,7 @@ RESTRICTIONS_TEXT = """ORI RESTRICTED MODES & TRUST RULES
   useful general information but do not pretend to be a qualified professional or a guarantee.
 """
 
-ASSISTANT_KNOWLEDGE_TEXT = f"""ORI 3.5.0 ASSISTANT KNOWLEDGE AND IDENTITY RULES
+ASSISTANT_KNOWLEDGE_TEXT = f"""ORI {APP_VERSION} ASSISTANT KNOWLEDGE AND IDENTITY RULES
 
 PRODUCT IDENTITY
 - Product name: ORI.
@@ -220,14 +220,14 @@ DETAILED SETTINGS DOCUMENTATION
 {SETTINGS_KNOWLEDGE_TEXT}
 """
 
-TERMS_TEXT = f"""ORI 3.5.0 — TERMS AND CONDITIONS
+TERMS_TEXT = f"""ORI {APP_VERSION} — TERMS AND CONDITIONS
 Effective date: {RELEASE_DATE}
 
 By installing, connecting to, or using ORI, you agree to these terms. If you do not agree, do
 not use the application.
 
 1. PREVIEW SOFTWARE
-ORI 3.5.0 is a private-preview desktop assistant provided for evaluation. Features may be
+ORI {APP_VERSION} is a private-preview desktop assistant provided for evaluation. Features may be
 incomplete, changed, unavailable, or removed in later builds. No uptime, accuracy, or continued
 availability is promised. The planned final release is {PLANNED_FINAL_RELEASE}; that is a plan,
 not a guarantee.

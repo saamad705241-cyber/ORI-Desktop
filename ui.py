@@ -336,86 +336,17 @@ class _SysMetrics:
         return -1.0   # N/A — zero subprocess on all platforms
 
     def _get_temp(self) -> float:
-        # Windows CPU package/core sensors are often exposed by LibreHardwareMonitor
-        # when it is running with its hardware driver. Prefer those real sensor
-        # values over generic ACPI thermal zones, which may reflect a board/skin
-        # sensor rather than CPU package temperature. ORI does not install or
-        # launch hardware-monitoring software without the user's choice.
-        if _OS == "Windows" and (
-            self._lhwmi_ok is not False or time.monotonic() - self._lhwmi_last_probe > 30.0
-        ):
-            self._lhwmi_last_probe = time.monotonic()
-            try:
-                import wmi  # type: ignore
-                candidates = []
-                # LibreHardwareMonitor is preferred; OpenHardwareMonitor is a
-                # compatible fallback for PCs where the older provider is used.
-                for namespace in (r"root\LibreHardwareMonitor", r"root\OpenHardwareMonitor"):
-                    try:
-                        conn = wmi.WMI(namespace=namespace)
-                        readings = conn.Sensor(SensorType="Temperature")
-                    except Exception:
-                        continue
-                    for sensor in readings:
-                        name = str(getattr(sensor, "Name", "") or "")
-                        parent = str(getattr(sensor, "Parent", "") or "")
-                        hardware = str(getattr(sensor, "HardwareType", "") or "")
-                        context = f"{name} {parent} {hardware}".lower()
-                        if any(word in context for word in ("nvidia", "radeon", "gpu", "graphics")):
-                            continue
-                        is_cpu = (
-                            "cpu" in context or "amdcpu" in context or "intelcpu" in context
-                            or str(hardware).casefold() in ("cpu", "amdcpu", "intelcpu")
-                        )
-                        if not is_cpu:
-                            continue
-                        try:
-                            value = float(getattr(sensor, "Value"))
-                        except (TypeError, ValueError):
-                            continue
-                        if 0.0 < value < 125.0:
-                            weight = 2 if any(word in name.lower() for word in ("package", "tctl", "tdie", "core", "ccd")) else 1
-                            candidates.append((weight, value))
-                    if candidates:
-                        self._lhwmi_conn = conn
-                        self._lhwmi_ok = True
-                        max_weight = max(weight for weight, _ in candidates)
-                        return max(value for weight, value in candidates if weight == max_weight)
-                self._lhwmi_conn = None
-                self._lhwmi_ok = False
-            except Exception:
-                self._lhwmi_conn = None
-                self._lhwmi_ok = False
-
-        # psutil — works on Linux; occasionally Windows with driver support
+        # Share the same sensor resolver used by hardware_inventory.
         try:
-            temps = psutil.sensors_temperatures()
-            for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
-                         "cpu-thermal", "zenpower", "it8688"]:
-                if name in temps and temps[name]:
-                    return temps[name][0].current
-            for entries in temps.values():
-                if entries:
-                    return entries[0].current
+            from core.hardware_sensors import get_cpu_temperature
+            reading = get_cpu_temperature()
+            if reading and reading.get("temperature_c") is not None:
+                self._cpu_temp_provider = str(reading.get("provider") or "hardware sensor")
+                return float(reading["temperature_c"])
         except Exception:
             pass
-
-        # Windows: wmi module (pure Python COM, zero subprocess). Reuse a single
-        # connection — building a fresh wmi.WMI() on every poll spins up a COM
-        # connection each time and is very slow. Give up after one failure.
-        if _OS == "Windows" and self._wmi_ok is not False:
-            try:
-                if self._wmi_conn is None:
-                    import wmi  # type: ignore
-                    self._wmi_conn = wmi.WMI(namespace="root/wmi")
-                tz = self._wmi_conn.MSAcpi_ThermalZoneTemperature()
-                if tz:
-                    return (tz[0].CurrentTemperature / 10.0) - 273.15
-            except Exception:
-                self._wmi_ok   = False
-                self._wmi_conn = None
-
-        return -1.0   # N/A — zero subprocess on all platforms
+        self._cpu_temp_provider = None
+        return -1.0
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -2928,6 +2859,8 @@ class MainWindow(QMainWindow):
     _plugin_test_done_sig = pyqtSignal(str, bool, str)
     _gemini_key_test_sig = pyqtSignal(str, bool, str)
     _weather_result_sig = pyqtSignal(object)  # thread-safe weather/location result
+    _location_access_sig = pyqtSignal(object)  # WinRT callback marshalled to Qt UI thread
+    _location_weather_sig = pyqtSignal(object)  # reverse-geocode/weather worker result
     _remote_status_sig = pyqtSignal(str, bool, str)  # dashboard state + startup detail
     _remote_connected_sig = pyqtSignal()         # phone pairing from runtime thread
     _remote_mute_sig = pyqtSignal(bool)           # phone-controlled PC microphone mute
@@ -3252,6 +3185,11 @@ class MainWindow(QMainWindow):
         self._plugin_test_done_sig.connect(self._on_plugin_test_done)
         self._gemini_key_test_sig.connect(self._on_gemini_key_test_done)
         self._weather_result_sig.connect(self._on_weather_result)
+        self._location_access_sig.connect(self._on_device_location_result)
+        self._location_weather_sig.connect(self._on_location_weather_result)
+        self._location_request_inflight = False
+        self._location_access_generation = 0
+        self._location_generation = 0
         self._weather_busy = False
         self._weather_generation = 0
         self._cam_stop = threading.Event()
@@ -3287,6 +3225,7 @@ class MainWindow(QMainWindow):
         self._weather_refresh_timer.timeout.connect(self._refresh_saved_weather)
         self._weather_refresh_timer.start(15 * 60 * 1000)
         QTimer.singleShot(1400, self._refresh_weather_if_enabled)
+        QTimer.singleShot(2400, self._maybe_prompt_startup_location)
 
     def _show_camera_frame(self, img_bytes: bytes):
         """Slot — display camera preview overlay (main thread)."""
@@ -4051,6 +3990,7 @@ class MainWindow(QMainWindow):
         self._home_mute_btn.setToolTip("Toggle microphone mute (F4)")
         self._home_mute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._home_mute_btn.setFont(QFont(UI_FONT, 8, QFont.Weight.Bold))
+        self._style_mute_btn()
         self._home_mute_btn.clicked.connect(self._toggle_mute)
         controls.addWidget(self._home_mute_btn)
 
@@ -4059,6 +3999,10 @@ class MainWindow(QMainWindow):
         self._home_interrupt_btn.setToolTip("Interrupt ORI speech immediately (Esc)")
         self._home_interrupt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._home_interrupt_btn.setFont(QFont(UI_FONT, 8, QFont.Weight.Bold))
+        _stop_icon = CONFIG_DIR / "voice-stop.svg"
+        if _stop_icon.exists():
+            self._home_interrupt_btn.setIcon(QIcon(str(_stop_icon)))
+            self._home_interrupt_btn.setIconSize(QSize(16, 16))
         self._home_interrupt_btn.setStyleSheet(f"""
             QPushButton {{ color: {C.MUTED_C}; background: rgba(22, 0, 8, 190);
                 border: 1px solid {C.MUTED_C}; border-radius: 2px; padding: 0 6px; }}
@@ -4701,6 +4645,41 @@ class MainWindow(QMainWindow):
         sensor_btn.clicked.connect(self._recheck_temperature_sensor)
         system.addWidget(sensor_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         self._refresh_temperature_sensor_status()
+
+        location = panel(
+            l3,
+            "LOCATION & WEATHER",
+            "Allow Windows device location to show your area and current weather. Coordinates are shared with OpenStreetMap and Open-Meteo only after your consent.",
+        )
+        self._location_status_lbl = QLabel(
+            "LOCATION NOT ENABLED · ORI will ask once when the configured app starts."
+        )
+        self._weather_status_lbl = self._location_status_lbl
+        self._location_status_lbl.setWordWrap(True)
+        self._location_status_lbl.setFont(QFont(UI_FONT, 8))
+        self._location_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        location.addWidget(self._location_status_lbl)
+
+        location_actions = QHBoxLayout()
+        location_actions.setSpacing(8)
+        self._location_enable_btn = button("ALLOW DEVICE LOCATION", True)
+        self._location_enable_btn.clicked.connect(self._enable_device_location)
+        self._location_open_settings_btn = button("WINDOWS LOCATION PRIVACY")
+        self._location_open_settings_btn.clicked.connect(self._open_windows_location_settings)
+        location_actions.addWidget(self._location_enable_btn)
+        location_actions.addWidget(self._location_open_settings_btn)
+        location_actions.addStretch(1)
+        location.addLayout(location_actions)
+
+        self._location_disable_btn = button("DISABLE LOCATION & WEATHER")
+        self._location_disable_btn.clicked.connect(self._disable_device_location)
+        location.addWidget(self._location_disable_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        location.addWidget(self._small_note(
+            "Location is requested from Windows only while ORI is in the foreground. "
+            "The saved coordinates stay in your local ORI configuration until you disable this feature. "
+            "Windows permission can also be revoked in Windows Location Privacy."
+        ))
+        location.addStretch(1)
         system.addStretch(1)
         self._settings_stack.addWidget(p3)
 
@@ -4840,7 +4819,7 @@ class MainWindow(QMainWindow):
             self._sensor_status_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
         else:
             self._sensor_status_lbl.setText(
-                "CPU temperature is not exposed by this PC right now. For a real reading, run LibreHardwareMonitor or Open Hardware Monitor with its WMI sensor provider enabled. ORI will never invent a temperature."
+                "CPU temperature is unavailable. With LibreHardwareMonitor 0.9.6, open Options → Remote Web Server → Run (default localhost:8085). ORI reads its local data.json endpoint and never invents a temperature."
             )
             self._sensor_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
 
@@ -4995,6 +4974,228 @@ class MainWindow(QMainWindow):
             self._gemini_status.setText("NOT CONNECTED · Add a Google AI Studio API key to start ORI.")
             self._gemini_status.setStyleSheet(f"color: {C.ACC}; background: transparent;")
 
+    def _confirm_location_data_sharing(self) -> bool:
+        reply = QMessageBox.question(
+            self,
+            "Enable ORI Location & Weather",
+            "ORI can ask Windows for your device location. If you allow it, ORI sends the coordinates to OpenStreetMap to resolve your area name and to Open-Meteo to retrieve current weather. The coordinates are saved only in your local ORI configuration for weather refreshes.\n\nContinue and request Windows location access?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            self._weather_write_config({"location_prompt_decision": "later"})
+            if hasattr(self, "_location_status_lbl"):
+                self._location_status_lbl.setText(
+                    "LOCATION NOT ENABLED · You can allow it later from Settings."
+                )
+            return False
+        self._weather_write_config({"location_prompt_decision": "accepted"})
+        return True
+
+    def _maybe_prompt_startup_location(self) -> None:
+        """Ask once on startup, then reuse the saved consent on later launches."""
+        if not getattr(self, "_ready", False):
+            return
+        config = _read_full_config()
+        decision = str(config.get("location_prompt_decision") or "")
+        if decision == "accepted":
+            self._begin_device_location_request()
+            return
+        if decision in ("later", "disabled"):
+            if config.get("weather_enabled"):
+                self._launch_weather_worker("refresh")
+            return
+        if self._confirm_location_data_sharing():
+            self._begin_device_location_request()
+        elif config.get("weather_enabled"):
+            self._launch_weather_worker("refresh")
+
+    def _enable_device_location(self) -> None:
+        config = _read_full_config()
+        if config.get("location_prompt_decision") != "accepted":
+            if not self._confirm_location_data_sharing():
+                return
+        self._begin_device_location_request()
+
+    def _begin_device_location_request(self) -> None:
+        if self._location_request_inflight:
+            return
+        if not getattr(self, "_ready", False):
+            if hasattr(self, "_location_status_lbl"):
+                self._location_status_lbl.setText("FINISH ORI SETUP FIRST · Then enable device location here.")
+            return
+        self._location_request_inflight = True
+        self._location_access_generation += 1
+        request_generation = self._location_access_generation
+        if hasattr(self, "_location_enable_btn"):
+            self._location_enable_btn.setEnabled(False)
+            self._location_enable_btn.setText("REQUESTING WINDOWS LOCATION…")
+        if hasattr(self, "_location_status_lbl"):
+            self._location_status_lbl.setText(
+                "WAITING FOR WINDOWS LOCATION PERMISSION AND A DEVICE POSITION…"
+            )
+        try:
+            from core.location_service import request_location_access
+            def deliver_location_result(result: dict) -> None:
+                payload = dict(result)
+                payload["request_generation"] = request_generation
+                self._location_access_sig.emit(payload)
+            started = request_location_access(deliver_location_result)
+            if not started:
+                self._location_request_inflight = False
+        except Exception as exc:
+            self._location_access_sig.emit({
+                "ok": False,
+                "reason": "unavailable",
+                "error": f"Could not start device location: {type(exc).__name__}: {exc}",
+                "request_generation": request_generation,
+            })
+
+    def _on_device_location_result(self, result: object) -> None:
+        if not isinstance(result, dict):
+            return
+        if result.get("request_generation") != self._location_access_generation:
+            return
+        if _read_full_config().get("location_prompt_decision") != "accepted":
+            return
+        self._location_request_inflight = False
+        if hasattr(self, "_location_enable_btn"):
+            self._location_enable_btn.setEnabled(True)
+            self._location_enable_btn.setText("REFRESH DEVICE LOCATION")
+        if not isinstance(result, dict) or not result.get("ok"):
+            error = str(
+                result.get("error") if isinstance(result, dict)
+                else "Windows returned an invalid location response."
+            )
+            reason = str(result.get("reason") or "") if isinstance(result, dict) else ""
+            if hasattr(self, "_location_status_lbl"):
+                self._location_status_lbl.setText("LOCATION UNAVAILABLE · " + error)
+            if reason == "denied":
+                self._set_weather_top_off(
+                    "LOC DENIED",
+                    "Windows denied ORI location access. Open Windows Location Privacy to change it."
+                )
+            elif reason == "unavailable":
+                self._set_weather_top_off("LOC N/A", "Windows device location is unavailable in this build or on this PC.")
+            return
+
+        try:
+            latitude = float(result["latitude"])
+            longitude = float(result["longitude"])
+        except (KeyError, TypeError, ValueError):
+            self._location_status_lbl.setText("LOCATION ERROR · Windows returned invalid coordinates.")
+            return
+        accuracy = result.get("accuracy_m")
+        if hasattr(self, "_location_status_lbl"):
+            self._location_status_lbl.setText(
+                "LOCATION FOUND · Resolving your area and current weather…"
+            )
+        self._launch_location_weather_worker(latitude, longitude, accuracy)
+
+    def _launch_location_weather_worker(
+        self, latitude: float, longitude: float, accuracy_m: float | None
+    ) -> None:
+        previous_cancel = getattr(self, "_location_cancel_event", None)
+        if previous_cancel is not None:
+            previous_cancel.set()
+        cancel_event = threading.Event()
+        self._location_cancel_event = cancel_event
+        self._location_generation += 1
+        generation = self._location_generation
+
+        def worker() -> None:
+            try:
+                from core.weather_service import (
+                    fetch_current_weather,
+                    reverse_geocode_coordinates,
+                )
+                if cancel_event.is_set():
+                    return
+                location = reverse_geocode_coordinates(latitude, longitude)
+                if cancel_event.is_set():
+                    return
+                result = fetch_current_weather(location)
+                if cancel_event.is_set():
+                    return
+                result.update({
+                    "ok": True,
+                    "request_mode": "device",
+                    "device_accuracy_m": accuracy_m,
+                })
+            except Exception as exc:
+                result = {
+                    "ok": False,
+                    "request_mode": "device",
+                    "error": f"{type(exc).__name__}: {exc}"[:500],
+                }
+            result["generation"] = generation
+            self._location_weather_sig.emit(result)
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name="ori-location-weather",
+        ).start()
+
+    def _on_location_weather_result(self, result: object) -> None:
+        if not isinstance(result, dict):
+            result = {"ok": False, "error": "Location/weather returned an invalid response."}
+        if result.get("generation") != self._location_generation:
+            return
+        if not result.get("ok"):
+            error = str(result.get("error") or "Weather provider did not return a result.")
+            if hasattr(self, "_location_status_lbl"):
+                self._location_status_lbl.setText(
+                    "LOCATION RECEIVED · WEATHER UPDATE FAILED · " + error
+                )
+            self._set_weather_top_off("WX ERR", error)
+            return
+
+        weather_result = dict(result)
+        weather_result["generation"] = self._weather_generation
+        self._on_weather_result(weather_result)
+        accuracy = result.get("device_accuracy_m")
+        if accuracy is not None:
+            try:
+                accuracy_text = f"Windows location accuracy: approximately ±{float(accuracy):.0f} m."
+            except (TypeError, ValueError):
+                accuracy_text = "Windows did not report an accuracy estimate."
+        else:
+            accuracy_text = "Windows did not report an accuracy estimate."
+        locality = str(result.get("location_label") or "Current location")
+        if hasattr(self, "_location_status_lbl"):
+            self._location_status_lbl.setText(
+                f"LOCATION ACTIVE · {locality}\n{accuracy_text}\n"
+                "Area name: © OpenStreetMap contributors · Weather: Open-Meteo."
+            )
+
+    def _disable_device_location(self) -> None:
+        self._location_access_generation += 1
+        cancel_event = getattr(self, "_location_cancel_event", None)
+        if cancel_event is not None:
+            cancel_event.set()
+        self._location_generation += 1
+        self._location_request_inflight = False
+        self._weather_write_config(
+            {"location_prompt_decision": "disabled", "weather_enabled": False},
+            remove=(
+                "weather_latitude", "weather_longitude", "weather_city",
+                "weather_region", "weather_country", "weather_location_label",
+                "weather_location_source", "weather_last_updated",
+            ),
+        )
+        self._set_weather_top_off(
+            "WX OFF",
+            "ORI location and weather are disabled. You can revoke Windows permission in Location Privacy."
+        )
+        if hasattr(self, "_location_status_lbl"):
+            self._location_status_lbl.setText(
+                "LOCATION & WEATHER DISABLED · Saved coordinates cleared. To revoke the Windows permission too, open Windows Location Privacy."
+            )
+
+    def _open_windows_location_settings(self) -> None:
+        QDesktopServices.openUrl(QUrl("ms-settings:privacy-location"))
+
     def _weather_write_config(self, updates: dict | None = None, remove: tuple[str, ...] = ()) -> dict:
         data = _read_full_config()
         for key in remove:
@@ -5096,6 +5297,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_weather_if_enabled(self) -> None:
         cfg = _read_full_config()
+        if cfg.get("location_prompt_decision") == "accepted":
+            return
         if cfg.get("weather_enabled"):
             self._launch_weather_worker("refresh")
         else:
@@ -5208,7 +5411,7 @@ class MainWindow(QMainWindow):
                 f"{label}: {temp:.1f}°C · {result.get('condition', 'Current conditions')}\n"
                 f"Feels like: {feels if feels is not None else 'N/A'}°C · Humidity: {humidity if humidity is not None else 'N/A'}% · "
                 f"Wind: {wind if wind is not None else 'N/A'} km/h\n"
-                f"Source: Open-Meteo · location method: {location_source}. Not precise GPS."
+                f"Source: Open-Meteo · locality: OpenStreetMap contributors · location method: {location_source}."
             )
         details = (
             f"CURRENT ESTIMATE · {label} · {temp:.1f}°C · {result.get('condition', 'Current conditions')}"
@@ -5273,6 +5476,7 @@ class MainWindow(QMainWindow):
         API_FILE.parent.mkdir(parents=True, exist_ok=True)
         API_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
         self._ready = True
+        QTimer.singleShot(1200, self._maybe_prompt_startup_location)
         self._refresh_settings_status()
         self._gemini_status.setText("KEY VERIFIED · " + message)
         self._gemini_status.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
@@ -7165,6 +7369,13 @@ class MainWindow(QMainWindow):
                 pass
 
     def _style_mute_btn(self):
+        _mic_icon = CONFIG_DIR / ("microphone-muted.svg" if self._muted else "microphone-on.svg")
+        if _mic_icon.exists():
+            _mic_qicon = QIcon(str(_mic_icon))
+            for _target in (getattr(self, "_mute_btn", None), getattr(self, "_home_mute_btn", None)):
+                if _target is not None:
+                    _target.setIcon(_mic_qicon)
+                    _target.setIconSize(QSize(16, 16))
         if self._muted:
             self._mute_btn.setText("MICROPHONE MUTED")
             self._mute_btn.setStyleSheet(f"""
@@ -7269,6 +7480,7 @@ class MainWindow(QMainWindow):
                     data[field] = profile[field]
         API_FILE.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
         self._ready = True
+        QTimer.singleShot(1200, self._maybe_prompt_startup_location)
         if self._overlay:
             self._overlay.hide()
             self._overlay = None

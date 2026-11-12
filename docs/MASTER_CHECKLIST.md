@@ -1,7 +1,7 @@
 # ORI Master Development Checklist
 
 This is the single source of truth for ORI's remaining development work.
-The current published baseline is ORI 3.5.0. Do not create a final installer or
+The current published baseline is ORI 3.5.0; the active patch candidate is ORI 3.5.1. Do not create a final installer or
 declare a final release until the acceptance checks in the final phases pass.
 
 ## Current baseline
@@ -22,6 +22,19 @@ declare a final release until the acceptance checks in the final phases pass.
       FA607NUQ, AMD Ryzen 7 170 (8 cores / 16 threads), 16 GB Micron RAM,
       AMD Radeon Graphics, NVIDIA GeForce RTX 4050 Laptop GPU, FA607NUQ
       motherboard, KIOXIA 512 GB SSD, Windows 11 build 26300.
+
+## ORI 3.5.1: CPU temperature, startup location and microphone/voice controls
+
+- [ ] Parse CPU package/Tctl/Tdie readings from LibreHardwareMonitor's local HTTP JSON endpoint at 127.0.0.1:8085/data.json, with legacy WMI and psutil fallbacks.
+- [ ] Use the same CPU-temperature provider in the live top-bar metric and hardware_inventory action.
+- [ ] Add first-launch location consent, then request Windows device-location access on the foreground UI thread.
+- [ ] Fetch current weather and locality only after explicit consent; keep coordinates in local configuration and provide disable and Windows privacy-settings controls.
+- [ ] Add a visible Location & Weather section in System Settings.
+- [ ] Add bundled microphone-on, microphone-muted and stop-voice icons to the home controls.
+- [ ] Verify tests, Gitleaks, Ruff and the Windows PyInstaller package in CI.
+- [ ] Physically verify CPU temperature with LibreHardwareMonitor Remote Web Server enabled, Windows location consent, and the microphone controls on the ASUS development laptop.
+
+Physical verification note: LibreHardwareMonitor 0.9.5+ no longer supplies the legacy WMI sensor namespace. For LHM 0.9.6, its local Remote Web Server must be enabled (Options > Remote Web Server > Run) for ORI to read CPU temperature. ORI shows N/A when no real CPU sensor is available.
 
 ## Next-session P0: Action execution reliability (new critical bug)
 

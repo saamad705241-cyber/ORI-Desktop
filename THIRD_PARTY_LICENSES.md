@@ -14,7 +14,7 @@ python scripts\export_licenses.py
 
 This writes `THIRD_PARTY_LICENSES.generated.md` using the installed Python package metadata and marks any distribution whose license metadata is missing or ambiguous for manual review. Keep the original package license files with the release and review PyQt6's licensing option before publishing binaries.
 
-Key integrations include PyQt6, Google Gen AI SDK, FastAPI/Uvicorn, Requests, Playwright, WebRTC VAD, PyAutoGUI, Pillow, OpenCV, psutil, qrcode, cryptography, WMI/pywin32 and NVIDIA's `nvidia-ml-py` NVML bindings (BSD-3-Clause; Python import name `pynvml`). Each retains its own copyright and license.
+Key integrations include PyQt6, Google Gen AI SDK, FastAPI/Uvicorn, Requests, Playwright, WebRTC VAD, PyAutoGUI, Pillow, OpenCV, psutil, qrcode, cryptography, WMI/pywin32, NVIDIA's `nvidia-ml-py` NVML bindings (BSD-3-Clause; Python import name `pynvml`), and PyWinRT's `winrt-runtime` plus `winrt-Windows.Devices.Geolocation` bindings (MIT). Each retains its own copyright and license.
 
 ## Bundled browser dependency
 

@@ -12,7 +12,7 @@
   "wake_word_enabled": false,
   "push_to_talk_enabled": false,
   "product_name": "ORI",
-  "product_version": "3.5.0",
+  "product_version": "3.5.1",
   "voice_interrupt_enabled": true,
   "github_repository": "saamad705241-cyber/ORI-Desktop"
 }

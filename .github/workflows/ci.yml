@@ -25,6 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pytest ruff
+          python -c "from winrt.windows.devices.geolocation import Geolocator; assert callable(Geolocator.request_access_async)"
       - name: Compile Python sources
         run: python scripts/compile_sources.py
       - name: Run automated tests
@@ -69,12 +70,15 @@ jobs:
             "dist/ORI/dashboard/static/app.html",
             "dist/ORI/dashboard/static/login.html",
             "dist/ORI/dashboard/static/crypto-js.js",
-            "dist/ORI/dashboard/static/crypto-js-LICENSE.txt"
+            "dist/ORI/dashboard/static/crypto-js-LICENSE.txt",
+            "dist/ORI/config/microphone-on.svg",
+            "dist/ORI/config/microphone-muted.svg",
+            "dist/ORI/config/voice-stop.svg"
           )
           foreach ($path in $required) {
             if (!(Test-Path $path)) { throw "Windows package is missing required file: $path" }
           }
-          Write-Host "Windows package and Phone Remote assets verified."
+          Write-Host "Windows package, Phone Remote, location runtime and microphone/voice assets verified."
       - uses: actions/upload-artifact@v4
         with:
           name: ORI-Windows-Package-${{ github.sha }}
