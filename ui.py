@@ -7128,16 +7128,10 @@ class MainWindow(QMainWindow):
 
     # ────────────────────────────────────────────────────────────────────────────
 
+    
     def _do_interrupt(self):
         if self.on_interrupt:
             self.on_interrupt()
-
-    def set_muted_from_remote(self, muted: bool | None = None) -> bool:
-        """Thread-safe remote microphone control; None queries current state."""
-        if muted is None:
-            return bool(self._muted)
-        self._remote_mute_sig.emit(bool(muted))
-        return bool(muted)
 
     def _toggle_mute(self):
         # A deliberate press settles the question: whatever the video did, or is
