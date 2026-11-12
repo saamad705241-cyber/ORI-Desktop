@@ -1,3 +1,4 @@
+
 {
   "assistant_name": "ORI",
   "assistant_mode": "cloud",
@@ -13,5 +14,5 @@
   "product_name": "ORI",
   "product_version": "3.5.0",
   "voice_interrupt_enabled": true,
-  "github_repository": ""
+  "github_repository": "saamad705241-cyber/ORI-Desktop"
 }
