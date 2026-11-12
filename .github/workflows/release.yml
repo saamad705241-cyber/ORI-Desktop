@@ -2,6 +2,7 @@ name: Build ORI Windows Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -12,6 +13,9 @@ jobs:
   verify:
     runs-on: windows-latest
     timeout-minutes: 35
+    outputs:
+      app_version: ${{ steps.release_gate.outputs.app_version }}
+      release_needed: ${{ steps.release_gate.outputs.release_needed }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,9 +32,54 @@ jobs:
           python scripts/compile_sources.py
           python -m pytest -q
           python -m ruff check --select F821,F822,F823,F811 main.py ui.py core actions memory dashboard tests
+      - name: Determine version and avoid duplicate releases
+        id: release_gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $appVersion = (python -c "from ori_metadata import APP_VERSION; print(APP_VERSION)").Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Could not read APP_VERSION from ori_metadata.py." }
+          if ($appVersion -notmatch '^\d+\.\d+\.\d+$') {
+            throw "APP_VERSION must use stable SemVer MAJOR.MINOR.PATCH. Found: $appVersion"
+          }
+
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tagVersion = "${{ github.ref_name }}".TrimStart('v', 'V')
+            if ($tagVersion -ne $appVersion) {
+              throw "Git tag version $tagVersion does not match APP_VERSION $appVersion."
+            }
+          }
+
+          $headers = @{
+            Accept = "application/vnd.github+json"
+            Authorization = "Bearer $env:GH_TOKEN"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $latestVersion = "0.0.0"
+          $releaseUrl = "https://api.github.com/repos/${{ github.repository }}/releases/latest"
+          try {
+            $latestRelease = Invoke-RestMethod -Uri $releaseUrl -Headers $headers -Method Get
+            $latestTag = [string]$latestRelease.tag_name
+            $latestVersion = $latestTag.TrimStart('v', 'V')
+          } catch {
+            $statusCode = 0
+            try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
+            if ($statusCode -ne 404) { throw }
+          }
+
+          if ($latestVersion -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Latest GitHub release tag is not a stable SemVer version: $latestVersion"
+          }
+
+          $shouldPublish = ([version]$appVersion -gt [version]$latestVersion)
+          "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_needed=$($shouldPublish.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "App version: $appVersion; latest published version: $latestVersion; publish: $shouldPublish"
 
   windows-release:
     needs: verify
+    if: needs.verify.outputs.release_needed == 'true'
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -49,16 +98,23 @@ jobs:
         run: ./scripts/build_release.ps1
       - name: Create release ZIP and SHA-256 file
         shell: pwsh
+        env:
+          ORI_VERSION: ${{ needs.verify.outputs.app_version }}
         run: |
-          $tag = "${{ github.ref_name }}".TrimStart('v')
-          $zip = "ORI-$tag-Windows.zip"
+          $version = $env:ORI_VERSION
+          $zip = "ORI-$version-Windows.zip"
           Compress-Archive -Path "dist/ORI" -DestinationPath $zip -CompressionLevel Optimal
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $zip" | Set-Content -Encoding ascii "$zip.sha256"
-      - name: Publish GitHub release
+      - name: Publish versioned GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.verify.outputs.app_version }}
+          target_commitish: ${{ github.sha }}
+          name: ORI v${{ needs.verify.outputs.app_version }}
+          make_latest: true
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            ORI-*-Windows.zip
-            ORI-*-Windows.zip.sha256
+            ORI-${{ needs.verify.outputs.app_version }}-Windows.zip
+            ORI-${{ needs.verify.outputs.app_version }}-Windows.zip.sha256
