@@ -8,6 +8,14 @@ After creating the public/private GitHub repository, set `github_repository` in 
 
 `.github/workflows/ci.yml` runs Python compilation, tests, Ruff correctness checks and Gitleaks on pushes and pull requests.
 
+## Windows package validation
+
+Every CI run builds the one-folder Windows application after tests and secret scanning pass.
+The package smoke test verifies `ORI.exe` plus the Phone Remote page, login page, bundled
+CryptoJS browser library and its MIT license. CI uploads the verified folder as a short-lived
+workflow artifact for manual testing. This validation artifact is not a published ORI release
+and does not change the in-app updater's latest-release channel.
+
 ## Publishing a Windows release
 
 1. Verify the upstream and third-party license terms before distribution.
