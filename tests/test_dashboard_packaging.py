@@ -6,6 +6,8 @@ from dashboard import server
 def test_phone_remote_static_assets_exist_in_source_runtime():
     assert (server.STATIC_DIR / "app.html").is_file()
     assert (server.STATIC_DIR / "login.html").is_file()
+    assert (server.STATIC_DIR / "crypto-js.js").is_file()
+    assert "CryptoJS" in server._read("crypto-js.js")
     assert server._read("app.html")
     assert server._read("login.html")
 
@@ -18,6 +20,7 @@ def test_frozen_runtime_resolves_assets_from_pyinstaller_bundle(tmp_path, monkey
     app_root.mkdir()
     (static_dir / "app.html").write_text("<html>app</html>", encoding="utf-8")
     (static_dir / "login.html").write_text("<html>login</html>", encoding="utf-8")
+    (static_dir / "crypto-js.js").write_text("var CryptoJS = {};", encoding="utf-8")
 
     monkeypatch.setattr(server.sys, "frozen", True, raising=False)
     monkeypatch.setattr(server.sys, "_MEIPASS", str(bundle_root), raising=False)
@@ -35,6 +38,7 @@ def test_frozen_runtime_falls_back_to_installed_dashboard_assets(tmp_path, monke
     app_root.mkdir(exist_ok=True)
     (static_dir / "app.html").write_text("<html>app</html>", encoding="utf-8")
     (static_dir / "login.html").write_text("<html>login</html>", encoding="utf-8")
+    (static_dir / "crypto-js.js").write_text("var CryptoJS = {};", encoding="utf-8")
 
     monkeypatch.setattr(server.sys, "frozen", True, raising=False)
     monkeypatch.setattr(server.sys, "_MEIPASS", str(bundle_root), raising=False)
