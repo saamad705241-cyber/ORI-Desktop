@@ -39,6 +39,9 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed `
   --collect-all pycaw `
   --collect-all comtypes `
   --collect-all mss `
+  --collect-all wmi `
+  --collect-all win32com `
+  --collect-all pynvml `
   --collect-submodules actions `
   --collect-submodules core `
   --collect-submodules plugins `
@@ -53,6 +56,8 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed `
   --hidden-import uvicorn.protocols.websockets.auto `
   --hidden-import uvicorn.lifespan.on `
   --hidden-import multipart `
+  --hidden-import pythoncom `
+  --hidden-import pywintypes `
   --hidden-import webrtcvad `
   main.py
 
