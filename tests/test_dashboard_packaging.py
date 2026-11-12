@@ -58,3 +58,72 @@ def test_phone_remote_html_missing_reports_actionable_path(tmp_path, monkeypatch
         assert str(missing_dir) in str(exc)
     else:
         raise AssertionError("Missing Phone Remote HTML should fail with a clear asset path")
+
+
+
+def _dashboard_for_startup_test(monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(server, "_local_ip", lambda: "192.168.1.20")
+    monkeypatch.setattr(
+        server,
+        "_find_available_port",
+        lambda start=server.PORT, attempts=32, exclude=None: int(start),
+    )
+    monkeypatch.setattr(server, "_ensure_certs", lambda _ip: False)
+    monkeypatch.setattr(server, "_ensure_network_access", lambda _port: None)
+    dashboard = server.DashboardServer()
+    status_updates = []
+    dashboard.set_status_callback(
+        lambda url, running, detail: status_updates.append((url, running, detail))
+    )
+    return dashboard, status_updates
+
+
+def test_dashboard_config_error_is_reported_instead_of_staying_starting(monkeypatch):
+    import asyncio
+
+    dashboard, status_updates = _dashboard_for_startup_test(monkeypatch)
+
+    def fail_config(*_args, **_kwargs):
+        raise ValueError("simulated config failure")
+
+    monkeypatch.setattr(server.uvicorn, "Config", fail_config)
+    asyncio.run(dashboard.serve())
+
+    assert "Uvicorn configuration" in dashboard._startup_error
+    assert "simulated config failure" in dashboard._startup_error
+    assert status_updates
+    assert status_updates[-1][1] is False
+
+
+def test_uvicorn_bind_error_is_reported_instead_of_staying_starting(monkeypatch):
+    import asyncio
+
+    dashboard, status_updates = _dashboard_for_startup_test(monkeypatch)
+    monkeypatch.setattr(server.uvicorn, "Config", lambda *_args, **_kwargs: object())
+
+    class BrokenServer:
+        def __init__(self, _config):
+            self.started = False
+            self.should_exit = False
+
+        async def serve(self):
+            raise OSError("simulated port bind failure")
+
+    monkeypatch.setattr(server.uvicorn, "Server", BrokenServer)
+    asyncio.run(dashboard.serve())
+
+    assert "Uvicorn socket binding" in dashboard._startup_error
+    assert "simulated port bind failure" in dashboard._startup_error
+    assert status_updates
+    assert status_updates[-1][1] is False
+
+
+def test_dashboard_diagnostic_log_is_written_under_local_app_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    server._write_dashboard_diagnostic("test startup diagnostic")
+
+    log_file = tmp_path / "ORI" / "logs" / "phone_remote.log"
+    assert log_file.is_file()
+    assert "test startup diagnostic" in log_file.read_text(encoding="utf-8")
