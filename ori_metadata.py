@@ -12,8 +12,8 @@ normal users cannot edit it through Settings.
 
 APP_NAME = "ORI"
 APP_VERSION = "3.5.0"
-APP_RELEASE_LABEL = "ORI 3.5.0"
-APP_MODEL_LABEL = "ORI Core 3.5"  # Product/runtime identity, not a foundation-model claim.
+APP_RELEASE_LABEL = f"ORI {APP_VERSION}"
+APP_MODEL_LABEL = f"ORI Core {'.'.join(APP_VERSION.split('.')[:2])}"  # Product/runtime identity, not a foundation-model claim.
 BUILD_DATE = "12 November 2026"
 RELEASE_DATE = BUILD_DATE
 PLANNED_FINAL_RELEASE = "November 2026"
@@ -50,7 +50,7 @@ TEAM_TEXT = (
     "do not invent a team size."
 )
 
-ABOUT_TEXT = f"""ORI 3.5.0 — PERSONAL AI DESKTOP ASSISTANT
+ABOUT_TEXT = f"""ORI {APP_VERSION} — PERSONAL AI DESKTOP ASSISTANT
 
 ORI stands for: O — Overcome | R — Rebuild | I — Improve
 Meaning: {ORI_MEANING_EN}
