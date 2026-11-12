@@ -1,3 +1,12 @@
+# ORI Changelog
+
+## 3.5.1 (13 November 2026)
+
+- Read CPU package/Tctl/Tdie temperatures from LibreHardwareMonitor 0.9.6 through its loopback JSON endpoint, and share the same sensor reader between the top bar and hardware inventory.
+- Add first-launch Windows device-location consent, local coordinate storage, area lookup and current weather.
+- Add microphone mute/unmute and stop-voice icons.
+- Update the Windows package to include PyWinRT location support and the new SVG assets.
+
 # Changelog
 
 ## 3.5.0 — 12 November 2026

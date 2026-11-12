@@ -45,6 +45,8 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
+from ori_metadata import APP_VERSION
+
 import sounddevice as sd
 import numpy as np
 from google import genai
@@ -2585,7 +2587,7 @@ class JarvisLive:
             await asyncio.sleep(delay)
 
 def _ensure_first_run_config() -> None:
-    """Create or safely migrate config metadata for ORI 3.5.0."""
+    """Create or safely migrate config metadata for the current ORI version."""
     if API_CONFIG_PATH.exists():
         try:
             data = json.loads(API_CONFIG_PATH.read_text(encoding="utf-8"))
@@ -2596,8 +2598,8 @@ def _ensure_first_run_config() -> None:
             if data.get("assistant_name") != "ORI":
                 data["assistant_name"] = "ORI"
                 changed = True
-            if data.get("product_version") != "3.5.0":
-                data["product_version"] = "3.5.0"
+            if data.get("product_version") != APP_VERSION:
+                data["product_version"] = APP_VERSION
                 changed = True
             if data.get("product_name") != "ORI":
                 data["product_name"] = "ORI"
@@ -2614,7 +2616,7 @@ def _ensure_first_run_config() -> None:
     data = {
         "assistant_name": "ORI",
         "product_name": "ORI",
-        "product_version": "3.5.0",
+        "product_version": APP_VERSION,
         "assistant_mode": "cloud",
         "os_system": os_name,
         "preferred_language": "Auto detect",
