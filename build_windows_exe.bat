@@ -38,15 +38,58 @@ REM to the executable directory. Never bundle config/api_keys.json or user memor
   --collect-all google.genai ^
   --collect-all sounddevice ^
   --collect-all webrtcvad ^
+  --collect-all fastapi ^
+  --collect-all starlette ^
+  --collect-all uvicorn ^
+  --collect-all websockets ^
+  --collect-all httptools ^
+  --collect-all h11 ^
+  --collect-all multipart ^
+  --collect-all cryptography ^
+  --collect-all qrcode ^
+  --collect-all PIL ^
+  --collect-all pyautogui ^
+  --collect-all pyperclip ^
+  --collect-all pycaw ^
+  --collect-all comtypes ^
+  --collect-all mss ^
   --collect-submodules actions ^
   --collect-submodules core ^
   --collect-submodules plugins ^
+  --collect-submodules dashboard ^
   --hidden-import actions ^
   --hidden-import plugins ^
   --hidden-import memory ^
+  --hidden-import dashboard.server ^
+  --hidden-import uvicorn.logging ^
+  --hidden-import uvicorn.loops.auto ^
+  --hidden-import uvicorn.protocols.http.auto ^
+  --hidden-import uvicorn.protocols.websockets.auto ^
+  --hidden-import uvicorn.lifespan.on ^
+  --hidden-import multipart ^
   main.py
 if errorlevel 1 goto :fail
 
+if not exist "dist\ORI\ORI.exe" (
+  echo ERROR: ORI.exe was not generated.
+  goto :fail
+)
+if not exist "dist\ORI\dashboard\static\app.html" (
+  echo ERROR: Phone Remote app.html was not bundled.
+  goto :fail
+)
+if not exist "dist\ORI\dashboard\static\login.html" (
+  echo ERROR: Phone Remote login.html was not bundled.
+  goto :fail
+)
+if not exist "dist\ORI\dashboard\static\crypto-js.js" (
+  echo ERROR: Phone Remote CryptoJS dependency was not bundled.
+  goto :fail
+)
+if not exist "dist\ORI\dashboard\static\crypto-js-LICENSE.txt" (
+  echo ERROR: Phone Remote CryptoJS MIT license was not bundled.
+  goto :fail
+)
 if not exist "dist\ORI\config" mkdir "dist\ORI\config"
 if not exist "dist\ORI\config\api_keys.json" (
   copy /y "config\api_keys.example.json" "dist\ORI\config\api_keys.json" >nul

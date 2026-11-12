@@ -24,18 +24,46 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed `
   --collect-all google.genai `
   --collect-all sounddevice `
   --collect-all webrtcvad `
+  --collect-all fastapi `
+  --collect-all starlette `
+  --collect-all uvicorn `
+  --collect-all websockets `
+  --collect-all httptools `
+  --collect-all h11 `
+  --collect-all multipart `
+  --collect-all cryptography `
+  --collect-all qrcode `
+  --collect-all PIL `
+  --collect-all pyautogui `
+  --collect-all pyperclip `
+  --collect-all pycaw `
+  --collect-all comtypes `
+  --collect-all mss `
   --collect-submodules actions `
   --collect-submodules core `
   --collect-submodules plugins `
+  --collect-submodules dashboard `
   --hidden-import actions `
   --hidden-import plugins `
   --hidden-import memory `
+  --hidden-import dashboard.server `
+  --hidden-import uvicorn.logging `
+  --hidden-import uvicorn.loops.auto `
+  --hidden-import uvicorn.protocols.http.auto `
+  --hidden-import uvicorn.protocols.websockets.auto `
+  --hidden-import uvicorn.lifespan.on `
+  --hidden-import multipart `
   --hidden-import webrtcvad `
   main.py
 
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
 if (!(Test-Path "dist\ORI\ORI.exe")) { throw "Build completed but dist\ORI\ORI.exe is missing." }
+foreach ($asset in @("dashboard\static\app.html", "dashboard\static\login.html", "dashboard\static\crypto-js.js", "dashboard\static\crypto-js-LICENSE.txt")) {
+  if (!(Test-Path (Join-Path "dist\ORI" $asset))) {
+    throw "Build is missing required Phone Remote asset: $asset"
+  }
+}
 if (!(Test-Path "dist\ORI\config")) { New-Item -ItemType Directory -Path "dist\ORI\config" | Out-Null }
 if (!(Test-Path "dist\ORI\config\api_keys.json")) {
   Copy-Item "config\api_keys.example.json" "dist\ORI\config\api_keys.json"
