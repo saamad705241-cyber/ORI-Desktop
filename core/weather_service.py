@@ -146,6 +146,61 @@ def _as_optional_float(value: Any) -> float | None:
         return None
 
 
+
+def reverse_geocode_coordinates(latitude: Any, longitude: Any) -> dict[str, Any]:
+    """Resolve consented Windows coordinates to a locality using OpenStreetMap.
+
+    The caller must obtain the user's explicit consent before sending these
+    coordinates to this service. Failure to resolve a locality does not prevent
+    the caller from fetching weather at the coordinates.
+    """
+    lat, lon = _valid_coordinates(latitude, longitude)
+    result = {
+        "latitude": lat,
+        "longitude": lon,
+        "city": "Current location",
+        "region": "",
+        "country": "",
+        "location_source": "Windows device location",
+        "location_label": "Current location",
+    }
+    try:
+        response = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={
+                "lat": lat,
+                "lon": lon,
+                "format": "jsonv2",
+                "zoom": 10,
+                "addressdetails": 1,
+            },
+            timeout=TIMEOUT_SECONDS,
+            headers={
+                "User-Agent": "ORI-Desktop/3.5.1 (consented device location and weather)",
+                "Accept": "application/json",
+            },
+        )
+        response.raise_for_status()
+        address = response.json().get("address") or {}
+        city = str(
+            address.get("city") or address.get("town") or address.get("village")
+            or address.get("municipality") or address.get("county")
+            or address.get("suburb") or "Current location"
+        ).strip()
+        region = str(address.get("state") or address.get("state_district") or "").strip()
+        country = str(address.get("country") or "").strip()
+        result.update({
+            "city": city,
+            "region": region,
+            "country": country,
+            "location_label": ", ".join(part for part in (city, region, country) if part) or "Current location",
+        })
+    except Exception:
+        # A reverse-geocoding outage must not prevent weather retrieval.
+        pass
+    return result
+
+
 def get_current_weather_by_approximate_ip() -> dict[str, Any]:
     """Resolve approximate public-IP area and fetch weather (explicit opt-in only)."""
     location = resolve_approximate_ip_location()

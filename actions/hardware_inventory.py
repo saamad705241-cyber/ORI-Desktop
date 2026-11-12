@@ -12,6 +12,8 @@ from typing import Any
 
 import psutil
 
+from core.hardware_sensors import get_cpu_temperature
+
 _GB = 1024 ** 3
 
 
@@ -289,6 +291,7 @@ def get_hardware_inventory() -> dict[str, Any]:
             "current_clock_mhz": cpu_frequency.get("current_mhz") if cpu_frequency else None,
         }]
 
+    cpu_thermal = get_cpu_temperature()
     nvidia_devices = _collect_nvidia_metrics()
     graphics = wmi_data.get("graphics", [])
     for metric in nvidia_devices:
@@ -337,6 +340,7 @@ def get_hardware_inventory() -> dict[str, Any]:
         "processor_frequency": cpu_frequency,
         "memory": memory_summary,
         "graphics": graphics,
+        "cpu_thermal": cpu_thermal,
         "motherboard": wmi_data.get("motherboard"),
         "operating_system": operating_system,
         "storage": {
@@ -347,6 +351,7 @@ def get_hardware_inventory() -> dict[str, Any]:
         "providers": {
             "windows_wmi": bool(wmi_data.get("wmi_available")),
             "nvidia_nvml": bool(nvidia_devices),
+            "librehardwaremonitor_http": bool(cpu_thermal and cpu_thermal.get("provider") == "LibreHardwareMonitor HTTP"),
         },
         "privacy": {
             "serial_numbers_collected": False,
@@ -368,7 +373,7 @@ TOOL = {
         "Read the computer's actual hardware specifications. Use when the user asks "
         "which laptop or PC they have, the exact manufacturer/model, processor name, "
         "CPU cores or threads, installed RAM and memory modules, graphics cards, "
-        "GPU memory or temperature (when supported), motherboard, storage drives, "
+        CPU temperature, GPU memory or temperature (when supported), motherboard, storage drives, 
         "Windows version/build, or screen resolution. This is read-only. Never guess "
         "a missing value; report null/unavailable when the hardware provider cannot "
         "read it. Serial numbers, MAC addresses, device IDs and product keys are not collected."

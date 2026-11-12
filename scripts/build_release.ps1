@@ -14,6 +14,9 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed `
   --add-data "knowledge;knowledge" `
   --add-data "config\ori.ico;config" `
   --add-data "config\instagram.svg;config" `
+  --add-data "config\microphone-on.svg;config" `
+  --add-data "config\microphone-muted.svg;config" `
+  --add-data "config\voice-stop.svg;config" `
   --add-data "config\api_keys.example.json;config" `
   --add-data "LICENSE;." `
   --add-data "ATTRIBUTION.md;." `
@@ -42,6 +45,8 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed `
   --collect-all wmi `
   --collect-all win32com `
   --collect-all pynvml `
+  --collect-all winrt.windows.devices.geolocation `
+  --hidden-import winrt.system `
   --collect-submodules actions `
   --collect-submodules core `
   --collect-submodules plugins `
