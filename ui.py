@@ -3188,6 +3188,7 @@ class MainWindow(QMainWindow):
         self._location_access_sig.connect(self._on_device_location_result)
         self._location_weather_sig.connect(self._on_location_weather_result)
         self._location_request_inflight = False
+        self._location_access_generation = 0
         self._location_generation = 0
         self._weather_busy = False
         self._weather_generation = 0
@@ -5024,6 +5025,8 @@ class MainWindow(QMainWindow):
                 self._location_status_lbl.setText("FINISH ORI SETUP FIRST · Then enable device location here.")
             return
         self._location_request_inflight = True
+        self._location_access_generation += 1
+        request_generation = self._location_access_generation
         if hasattr(self, "_location_enable_btn"):
             self._location_enable_btn.setEnabled(False)
             self._location_enable_btn.setText("REQUESTING WINDOWS LOCATION…")
@@ -5033,9 +5036,11 @@ class MainWindow(QMainWindow):
             )
         try:
             from core.location_service import request_location_access
-            started = request_location_access(
-                lambda result: self._location_access_sig.emit(result)
-            )
+            def deliver_location_result(result: dict) -> None:
+                payload = dict(result)
+                payload["request_generation"] = request_generation
+                self._location_access_sig.emit(payload)
+            started = request_location_access(deliver_location_result)
             if not started:
                 self._location_request_inflight = False
         except Exception as exc:
@@ -5046,6 +5051,12 @@ class MainWindow(QMainWindow):
             })
 
     def _on_device_location_result(self, result: object) -> None:
+        if not isinstance(result, dict):
+            return
+        if result.get("request_generation") != self._location_access_generation:
+            return
+        if _read_full_config().get("location_prompt_decision") != "accepted":
+            return
         self._location_request_inflight = False
         if hasattr(self, "_location_enable_btn"):
             self._location_enable_btn.setEnabled(True)
@@ -5158,6 +5169,7 @@ class MainWindow(QMainWindow):
             )
 
     def _disable_device_location(self) -> None:
+        self._location_access_generation += 1
         cancel_event = getattr(self, "_location_cancel_event", None)
         if cancel_event is not None:
             cancel_event.set()
