@@ -71,11 +71,19 @@ class ContextRefreshTests(unittest.TestCase):
         svc.force_refresh()
         self.assertEqual(svc._refresh_count, 1)
 
-    def test_force_refresh_advances_next_due_ts(self):
-        svc = self._make_service(interval=600)
-        before = svc._next_due_ts
-        svc.force_refresh()
-        self.assertGreater(svc._next_due_ts, before)
+    
+def test_force_refresh_advances_next_due_ts(self):
+    svc = self._make_service(interval=600)
+
+    # Simulate an old scheduled deadline.
+    svc._next_due_ts = time.monotonic() - 1.0
+    before = svc._next_due_ts
+
+    svc.force_refresh()
+
+    self.assertGreater(svc._next_due_ts, before)
+    self.assertGreater(svc.time_until_next_s(), 0.0)
+
 
     def test_concurrent_refresh_blocked(self):
         """A second force_refresh called while one is artificially in-progress
