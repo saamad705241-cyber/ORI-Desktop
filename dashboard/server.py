@@ -15,8 +15,10 @@ import re
 import secrets
 import socket
 import string
+import os
 import sys
 import time
+import traceback
 from pathlib import Path
 
 from .remote_control import capture_desktop_jpeg, execute_pointer_action, validate_phone_screen_frame
@@ -74,6 +76,22 @@ STATIC_DIR  = _resolve_static_dir()
 _CRYPTOJS_FILE = STATIC_DIR / "crypto-js.js"
 PORT        = 8000
 MAX_UPLOAD_MB = 500
+
+
+def _write_dashboard_diagnostic(message: str) -> None:
+    """Persist Phone Remote startup diagnostics without logging tokens or user content."""
+    try:
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        root = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+        log_dir = root / "ORI" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "phone_remote.log"
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with log_file.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{stamp}] {message.rstrip()}\\n")
+    except Exception:
+        # Diagnostics must never stop the dashboard from starting.
+        pass
 
 
 def _find_available_port(start: int = PORT, attempts: int = 32, exclude: set[int] | None = None) -> int | None:
@@ -1273,73 +1291,134 @@ class DashboardServer:
         await uvicorn.Server(cfg).serve()
 
     async def serve(self) -> None:
+        """Start Uvicorn and always surface actionable startup failures to Settings."""
+        server_task = None
+        server = None
+        stage = "initialization"
         self._startup_error = "Starting the local phone dashboard…"
         self._notify_status(False)
-        if not _DEPS_OK:
-            message = "FastAPI or Uvicorn is not installed. Run setup.bat again."
-            self._startup_error = message
-            print(f"[Dashboard] {message}")
-            self._notify_status(False)
-            return
-        if not self.port:
-            self._startup_error = "No free local port is available for the phone dashboard."
-            self._notify_status(False)
-            return
-        if self._ip in ("127.0.0.1", "0.0.0.0", ""):
-            self._startup_error = "No LAN IPv4 address detected. Connect this PC to Wi-Fi or Ethernet."
-            self._notify_status(False)
-            return
-
-        # Firewall setup runs in a thread — uvicorn starts immediately,
-        # no waiting for UAC dialogs or subprocess timeouts.
-        asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, self.port)
-
-        # Use the transport selected in __init__.  Re-checking the filesystem
-        # here could otherwise disagree with a QR URL already handed to the UI.
-        use_ssl  = self._use_ssl
-        ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
-
-        if use_ssl and self.alias_port and self.alias_port != self.port:
-            asyncio.create_task(self._serve_alias())
-
-        cfg = uvicorn.Config(
-            self.app, host="0.0.0.0", port=self.port, log_level="warning",
-            **({"ssl_keyfile": str(ssl_key), "ssl_certfile": str(ssl_cert)} if use_ssl else {}),
+        _write_dashboard_diagnostic(
+            f"START requested; fastapi_uvicorn_available={_DEPS_OK}; "
+            f"upload_support={_UPLOAD_OK}; static_dir_exists={STATIC_DIR.is_dir()}; "
+            f"app_html_exists={(STATIC_DIR / 'app.html').is_file()}; "
+            f"login_html_exists={(STATIC_DIR / 'login.html').is_file()}; "
+            f"crypto_js_exists={_CRYPTOJS_FILE.is_file()}"
         )
 
-        proto = "https" if use_ssl else "http"
-        print(f"[Dashboard] {proto}://{self._ip}:{self.port}")
-        print("[Dashboard] Press 'Remote Control' in ORI UI to get the QR code.")
-        server = uvicorn.Server(cfg)
-        self._uvicorn_server = server
-        server_task = asyncio.create_task(server.serve(), name="ori-dashboard-server")
         try:
-            # Do not tell the UI the dashboard is available until Uvicorn has
-            # successfully bound the socket. This also catches port conflicts.
+            if not _DEPS_OK:
+                raise RuntimeError("FastAPI or Uvicorn could not be imported in this build.")
+            if not self.port:
+                raise RuntimeError("No free local port is available for the phone dashboard.")
+            if self._ip in ("127.0.0.1", "0.0.0.0", ""):
+                raise RuntimeError(
+                    "No LAN IPv4 address detected. Connect this PC to Wi-Fi or Ethernet."
+                )
+
+            stage = "network access preparation"
+            self._startup_error = f"Starting the local phone dashboard… ({stage})"
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, _ensure_network_access, self.port)
+
+            use_ssl = bool(self._use_ssl)
+            ssl_key = BASE_DIR / "config" / "certs" / "jarvis.key"
+            ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
+            if use_ssl and not (ssl_key.is_file() and ssl_cert.is_file()):
+                raise FileNotFoundError(
+                    "HTTPS was selected but the local dashboard certificate or key is missing."
+                )
+
+            stage = "Uvicorn configuration"
+            self._startup_error = f"Starting the local phone dashboard… ({stage})"
+            if use_ssl and self.alias_port and self.alias_port != self.port:
+                asyncio.create_task(self._serve_alias(), name="ori-dashboard-alias")
+
+            cfg = uvicorn.Config(
+                self.app,
+                host="0.0.0.0",
+                port=self.port,
+                log_level="warning",
+                **(
+                    {"ssl_keyfile": str(ssl_key), "ssl_certfile": str(ssl_cert)}
+                    if use_ssl else {}
+                ),
+            )
+
+            stage = "Uvicorn server creation"
+            self._startup_error = f"Starting the local phone dashboard… ({stage})"
+            server = uvicorn.Server(cfg)
+            self._uvicorn_server = server
+
+            stage = "Uvicorn socket binding"
+            self._startup_error = f"Starting the local phone dashboard… ({stage})"
+            proto = "https" if use_ssl else "http"
+            _write_dashboard_diagnostic(
+                f"Starting Uvicorn; transport={proto}; port={self.port}; "
+                f"lan_address_available={bool(self._ip)}; ssl_enabled={use_ssl}"
+            )
+            server_task = asyncio.create_task(
+                server.serve(), name="ori-dashboard-server"
+            )
+
+            deadline = loop.time() + 20.0
             while not server.started and not server_task.done():
+                if loop.time() >= deadline:
+                    server.should_exit = True
+                    raise TimeoutError(
+                        "Uvicorn did not bind the Phone Remote port within 20 seconds."
+                    )
                 await asyncio.sleep(0.05)
 
-            if server.started:
-                self._running = True
-                self._startup_error = ''
-                self._notify_status(True)
-                await server_task
-            else:
-                error = ''
-                if not server_task.cancelled():
-                    try:
-                        error = str(server_task.exception() or '')
-                    except Exception:
-                        error = ''
-                self._startup_error = error or f"Could not bind {self._ip}:{self.port}"
-                print(f"[Dashboard] Startup failed: {self._startup_error}")
-                self._notify_status(False)
+            if server_task.done() and not server.started:
+                if server_task.cancelled():
+                    raise RuntimeError("Uvicorn startup task was cancelled before binding.")
+                task_error = server_task.exception()
+                if task_error is not None:
+                    raise RuntimeError(
+                        f"Uvicorn failed while binding local port {self.port}: "
+                        f"{type(task_error).__name__}: {task_error}"
+                    ) from task_error
+                raise RuntimeError(
+                    f"Uvicorn stopped before the Phone Remote port {self.port} became ready."
+                )
+
+            self._running = True
+            self._startup_error = ""
+            _write_dashboard_diagnostic(
+                f"READY; transport={proto}; port={self.port}"
+            )
+            self._notify_status(True)
+            await server_task
+
+            if self._running:
+                self._startup_error = "The local phone dashboard stopped."
+                _write_dashboard_diagnostic("STOPPED; Uvicorn returned normally.")
+
+        except asyncio.CancelledError:
+            _write_dashboard_diagnostic(
+                f"CANCELLED during {stage}; " + traceback.format_exc()
+            )
+            raise
         except Exception as exc:
-            self._startup_error = f"{type(exc).__name__}: {exc}"
-            print(f"[Dashboard] Startup/runtime failure: {self._startup_error}")
+            self._startup_error = (
+                f"Phone dashboard failed during {stage}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            _write_dashboard_diagnostic(
+                f"FAILED during {stage}: {type(exc).__name__}: {exc}\\n"
+                + traceback.format_exc()
+            )
+            print(f"[Dashboard] {self._startup_error}")
             self._notify_status(False)
         finally:
+            if server_task is not None and not server_task.done():
+                if server is not None:
+                    server.should_exit = True
+                try:
+                    await asyncio.wait_for(server_task, timeout=2.0)
+                except Exception:
+                    server_task.cancel()
+                    await asyncio.gather(server_task, return_exceptions=True)
             self._running = False
             self._uvicorn_server = None
             self._notify_status(False)
