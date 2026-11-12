@@ -24,7 +24,7 @@ from .remote_control import capture_desktop_jpeg, execute_pointer_action, valida
 _DEPS_OK = False
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-    from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response, RedirectResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
     import uvicorn
     _DEPS_OK = True
 except ImportError:
@@ -63,7 +63,7 @@ def _resolve_static_dir() -> Path:
         if key in seen:
             continue
         seen.add(key)
-        if (candidate / "app.html").is_file() and (candidate / "login.html").is_file():
+        if all((candidate / name).is_file() for name in ("app.html", "login.html", "crypto-js.js")):
             return candidate
     # Keep a deterministic path so _read() can report the precise missing file.
     return candidates[0]
@@ -71,6 +71,7 @@ def _resolve_static_dir() -> Path:
 
 BASE_DIR    = _application_root()
 STATIC_DIR  = _resolve_static_dir()
+_CRYPTOJS_FILE = STATIC_DIR / "crypto-js.js"
 PORT        = 8000
 MAX_UPLOAD_MB = 500
 
@@ -144,9 +145,6 @@ def _decrypt_cbc(aes_key: bytes, enc_b64: str) -> str:
 
 
 # ── CryptoJS (auto-download once, served locally) ─────────────────────────────
-_CRYPTOJS_CDN  = ("https://cdnjs.cloudflare.com/ajax/libs/"
-                  "crypto-js/4.2.0/crypto-js.min.js")
-_CRYPTOJS_FILE = STATIC_DIR / "crypto-js.min.js"
 
 
 def _ensure_network_access(port: int) -> None:
@@ -653,10 +651,16 @@ class DashboardServer:
         # serve CryptoJS from local cache, fallback to CDN redirect
         @app.get("/static/crypto.js")
         async def serve_crypto():
-            if _CRYPTOJS_FILE.exists():
-                return FileResponse(str(_CRYPTOJS_FILE),
-                                    media_type="application/javascript")
-            return RedirectResponse(_CRYPTOJS_CDN, status_code=307)
+            if _CRYPTOJS_FILE.is_file():
+                return FileResponse(
+                    str(_CRYPTOJS_FILE),
+                    media_type="application/javascript",
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"},
+                )
+            return JSONResponse(
+                {"ok": False, "error": "The bundled Phone Remote encryption asset is missing."},
+                status_code=503,
+            )
 
         @app.get("/login", response_class=HTMLResponse)
         async def login_page():
