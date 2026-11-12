@@ -88,7 +88,7 @@ def _write_dashboard_diagnostic(message: str) -> None:
         log_file = log_dir / "phone_remote.log"
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         with log_file.open("a", encoding="utf-8") as handle:
-            handle.write(f"[{stamp}] {message.rstrip()}\\n")
+            handle.write(f"[{stamp}] {message.rstrip()}\n")
     except Exception:
         # Diagnostics must never stop the dashboard from starting.
         pass
@@ -1405,7 +1405,7 @@ class DashboardServer:
                 f"{type(exc).__name__}: {exc}"
             )
             _write_dashboard_diagnostic(
-                f"FAILED during {stage}: {type(exc).__name__}: {exc}\\n"
+                f"FAILED during {stage}: {type(exc).__name__}: {exc}\n"
                 + traceback.format_exc()
             )
             print(f"[Dashboard] {self._startup_error}")
