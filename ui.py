@@ -224,7 +224,7 @@ def _nvml_gpu_windows() -> float:
 
 def _system_disk_root() -> str:
     if _OS == "Windows":
-        return (os.environ.get("SystemDrive") or "C:").rstrip("\\\/") + "\\"
+        return (os.environ.get("SystemDrive") or "C:").rstrip("\\/") + "\\"
     return "/"
 
 

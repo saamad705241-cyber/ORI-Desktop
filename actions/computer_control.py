@@ -702,7 +702,7 @@ def computer_control(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
-    "description": "Direct computer control. For type/smart_type/paste, use only literal user-supplied or explicitly confirmed text; never guess or rewrite speech. These actions report keyboard input sent, not verified destination contents. Ask the user to repeat or confirm unclear dictated text before calling them. Window closing is graceful and post-close verified."
+    "description": "Direct computer control. For type/smart_type/paste, use only literal user-supplied or explicitly confirmed text; never guess or rewrite speech. These actions report keyboard input sent, not verified destination contents. Ask the user to repeat or confirm unclear dictated text before calling them. Window closing is graceful and post-close verified.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
