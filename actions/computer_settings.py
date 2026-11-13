@@ -993,7 +993,7 @@ def computer_settings(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_settings",
-    "description": "Controls the computer: volume, brightness, window management, keyboard shortcuts, typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. Use for ANY single computer control command. restart, shutdown and toggle_wifi put a confirmation on the user's screen and do NOT happen until they press it — never claim they are done. Volume, brightness and dark mode can be reversed with the `undo` tool.",
+    "description": "Controls volume, brightness, windows, keyboard shortcuts, typing, fullscreen, dark mode, WiFi, restart, shutdown, scrolling, tabs, zoom, screenshots and system settings. For app closing, prefer close_app: on Windows it sends a graceful WM_CLOSE request and verifies the target process has no visible windows; it will not force-close unsaved work. close_window only sends the active tab/window shortcut and its effect is unverified. Other keyboard/mouse actions report that input was dispatched, not that the intended UI change definitely happened. restart, shutdown and toggle_wifi require the user's on-screen confirmation; never claim they completed merely because the request was queued. Volume/brightness/dark mode may be reversed with undo where available.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
