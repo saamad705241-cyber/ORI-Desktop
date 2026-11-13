@@ -21,7 +21,8 @@ def test_dashboard_health_endpoint_reports_ori_version():
         response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["app"] == "ORI"
-    assert response.json()["version"] == "3.5.0"
+    from ori_metadata import APP_VERSION
+    assert response.json()["version"] == APP_VERSION
 
 
 def test_remote_action_rejects_unpaired_phone():
