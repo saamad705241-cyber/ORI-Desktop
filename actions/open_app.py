@@ -320,8 +320,8 @@ def open_app(
             if launcher(app_name):
                 return f"Opened {app_name} and verified that its process or window is present."
         return (
-            f"A launch request was sent for {app_name}, but no matching process or window was found. "
-            f"The app may not be installed, may still be loading, or could not be verified. "
+            f"A launch request was sent for {app_name}, but the app was not confirmed: "
+            f"no matching process or window was found. It may not be installed or could not be verified. "
             f"ORI will not claim it opened."
         )
     except Exception as e:
