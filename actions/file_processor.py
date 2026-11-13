@@ -834,7 +834,12 @@ def file_processor(parameters: dict, player=None, speak=None) -> str:
 
     try:
         result = handler(path, action, params, speak)
-        return result or "Done."
+        if result is None or (isinstance(result, str) and not result.strip()):
+            return (
+                f"File processing for '{path.name}' returned no confirmation. "
+                "The outcome is unverified; do not report it as successful."
+            )
+        return result if isinstance(result, str) else str(result)
     except Exception as e:
         import traceback
         traceback.print_exc()
