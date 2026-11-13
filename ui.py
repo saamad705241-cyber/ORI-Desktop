@@ -4961,31 +4961,62 @@ class MainWindow(QMainWindow):
         about.addLayout(social_row)
 
         update_note = QLabel(
-            "SOFTWARE UPDATES · Check for a new ORI release. Downloads are verified before installation."
+            "SOFTWARE UPDATES · Each step is separate. Checking never downloads; "
+            "the installer is downloaded only when you press DOWNLOAD UPDATE."
         )
         update_note.setWordWrap(True)
         update_note.setFont(QFont(UI_FONT, 8))
         update_note.setStyleSheet(f"color: {C.ACC}; background: transparent;")
         about.addWidget(update_note)
-        self._app_update_status_lbl = QLabel("Update check has not been run.")
+        self._app_update_status_lbl = QLabel("Ready to check for an ORI update.")
         self._app_update_status_lbl.setWordWrap(True)
         self._app_update_status_lbl.setFont(QFont(UI_FONT, 8))
         self._app_update_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         about.addWidget(self._app_update_status_lbl)
+
+        self._latest_update_info = None
+        self._staged_update = None
+        self._installed_setup_build = bool(
+            platform.system() == "Windows"
+            and getattr(sys, "frozen", False)
+            and (Path(sys.executable).resolve().parent / "unins000.exe").is_file()
+        )
         update_actions = QHBoxLayout()
         update_actions.setSpacing(8)
-        self._check_updates_btn = button("CHECK & UPDATE", True)
-        self._check_updates_btn.setToolTip(
-            "Check the latest release, download and verify it, then install and restart ORI."
-        )
+        self._check_updates_btn = button("CHECK FOR UPDATES", True)
+        self._check_updates_btn.setToolTip("Only checks GitHub. It does not download or install anything.")
         self._check_updates_btn.clicked.connect(self._check_app_updates)
+        self._download_update_btn = button("DOWNLOAD UPDATE")
+        self._download_update_btn.setEnabled(False)
+        self._download_update_btn.clicked.connect(self._download_checked_update)
+        self._install_update_btn = button("INSTALL UPDATE")
+        self._install_update_btn.setEnabled(False)
+        self._install_update_btn.clicked.connect(self._install_downloaded_update)
         update_actions.addWidget(self._check_updates_btn)
-        update_actions.addStretch(1)
+        update_actions.addWidget(self._download_update_btn)
+        update_actions.addWidget(self._install_update_btn)
         about.addLayout(update_actions)
 
         terms_button = button("TERMS & CONDITIONS")
         terms_button.clicked.connect(lambda: self._show_terms_dialog(_ORI_TERMS_TEXT))
         about.addWidget(terms_button, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        uninstall_note = QLabel(
+            "UNINSTALL ORI · Removes the application and its shortcuts from this Windows account. "
+            "Your API key, preferences and ORI memory are kept under LocalAppData so reinstalling "
+            "can restore them. Remove that personal data separately only when you no longer need it."
+        )
+        uninstall_note.setWordWrap(True)
+        uninstall_note.setFont(QFont(UI_FONT, 8))
+        uninstall_note.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        about.addWidget(uninstall_note)
+        self._uninstall_ori_btn = button("UNINSTALL ORI")
+        self._uninstall_ori_btn.setEnabled(self._installed_setup_build)
+        self._uninstall_ori_btn.setToolTip(
+            "Available after installing ORI with the official Windows Setup installer."
+        )
+        self._uninstall_ori_btn.clicked.connect(self._uninstall_ori)
+        about.addWidget(self._uninstall_ori_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         about.addStretch(1)
         self._settings_stack.addWidget(p5)
 
