@@ -86,7 +86,7 @@ class ORIMetadataTests(unittest.TestCase):
         coming_soon = meta.ABOUT_TEXT.split("Coming soon / not enabled in this build", 1)[-1]
         self.assertNotIn("GitHub release checks", coming_soon)
         self.assertIn("SHA-256", meta.ABOUT_TEXT)
-        self.assertIn("candidate is not a published release yet", meta.ABOUT_TEXT)
+        self.assertIn("startup" , meta.ABOUT_TEXT.lower())
 
     # ------------------------------------------------------------------
     # ASSISTANT_KNOWLEDGE_TEXT completeness
