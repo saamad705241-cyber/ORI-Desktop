@@ -934,7 +934,7 @@ def computer_settings(
         except Exception as exc:
             return f"Could not safely close '{title}': {type(exc).__name__}: {exc}"
 
-    if not _PYAUTOGUI:
+    if not _PYAUTOGUI and action not in _IRREVERSIBLE:
         return "PyAutoGUI is not installed. This computer action is unavailable."
 
     if not action:
