@@ -8,6 +8,8 @@ import time
 
 import psutil
 
+from core.hardware_sensors import get_cpu_temperature
+
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 DEFAULT_THRESHOLDS = {
@@ -83,31 +85,13 @@ def _get_gpu_usage() -> float:
 
 
 def _get_cpu_temp() -> float:
-    # psutil — works on Linux; occasionally Windows with proper drivers
+    """Return the same validated CPU sensor reading shown in ORI's HUD."""
     try:
-        temps = psutil.sensors_temperatures()
-        for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
-                     "cpu-thermal", "zenpower", "it8688"]:
-            if name in temps and temps[name]:
-                return temps[name][0].current
-        for entries in temps.values():
-            if entries:
-                return entries[0].current
+        reading = get_cpu_temperature()
+        value = float(reading.get("temperature_c")) if reading else -1.0
+        return value if 0.0 < value < 125.0 else -1.0
     except Exception:
-        pass
-
-    # Windows: wmi module (pure Python COM, zero subprocess)
-    if _OS == "Windows":
-        try:
-            import wmi  # type: ignore
-            w = wmi.WMI(namespace="root/wmi")
-            tz = w.MSAcpi_ThermalZoneTemperature()
-            if tz:
-                return (tz[0].CurrentTemperature / 10.0) - 273.15
-        except Exception:
-            pass
-
-    return -1.0
+        return -1.0
 
 
 def get_system_status() -> dict:
