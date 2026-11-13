@@ -222,15 +222,31 @@ def _nvml_gpu_windows() -> float:
         return -1.0
 
 
+def _system_disk_root() -> str:
+    if _OS == "Windows":
+        return (os.environ.get("SystemDrive") or "C:").rstrip("\\\/") + "\\"
+    return "/"
+
+
 class _SysMetrics:
     def __init__(self):
-        self.cpu  = 0.0
-        self.mem  = 0.0
-        self.net  = 0.0   
-        self.gpu  = -1.0  
-        self.tmp  = -1.0  
+        self.cpu = 0.0
+        self.mem = 0.0
+        self.net = 0.0
+        self.net_rx_mbps = 0.0
+        self.net_tx_mbps = 0.0
+        self.gpu = -1.0
+        self.tmp = -1.0
+        self.disk_percent = -1.0
+        self.disk_used_gb = None
+        self.disk_total_gb = None
+        self.disk_free_gb = None
+        self.disk_read_mbps = 0.0
+        self.disk_write_mbps = 0.0
+        self.disk_path = _system_disk_root()
         self._lock = threading.Lock()
         self._last_net = psutil.net_io_counters()
+        self._last_disk_io = psutil.disk_io_counters()
         self._last_net_t = time.time()
         self._running = True
         # Probe caches — GPU (NVML) and temperature (WMI) are the expensive
@@ -243,6 +259,9 @@ class _SysMetrics:
         self._nv_unix   = None         # cached (lib, dev) for Linux/macOS NVML
         self._wmi_conn  = None         # cached ACPI WMI connection
         self._wmi_ok    = None         # None=untested, False=unavailable here
+        self._wmi_gpu_conn = None
+        self._wmi_gpu_ok = None
+        self._gpu_provider = None
         self._lhwmi_conn = None       # LibreHardwareMonitor WMI, if user runs it
         self._lhwmi_ok = None
         self._lhwmi_last_probe = 0.0
@@ -261,17 +280,43 @@ class _SysMetrics:
         cpu = psutil.cpu_percent(interval=None)
         mem = psutil.virtual_memory().percent
 
-        nc  = psutil.net_io_counters()
+        nc = psutil.net_io_counters()
         now = time.time()
-        dt  = now - self._last_net_t
-        if dt > 0:
-            sent = (nc.bytes_sent - self._last_net.bytes_sent) / dt
-            recv = (nc.bytes_recv - self._last_net.bytes_recv) / dt
-            net  = (sent + recv) / (1024 * 1024)
-        else:
-            net = 0.0
-        self._last_net   = nc
+        dt = max(0.0, now - self._last_net_t)
+        sent_bps = recv_bps = 0.0
+        if dt > 0 and nc is not None and self._last_net is not None:
+            sent_bps = max(0, nc.bytes_sent - self._last_net.bytes_sent) / dt
+            recv_bps = max(0, nc.bytes_recv - self._last_net.bytes_recv) / dt
+        net = (sent_bps + recv_bps) / (1024 * 1024)
+        net_rx_mbps = recv_bps * 8.0 / 1_000_000.0
+        net_tx_mbps = sent_bps * 8.0 / 1_000_000.0
+        self._last_net = nc
         self._last_net_t = now
+
+        disk_percent = self.disk_percent
+        disk_used_gb = self.disk_used_gb
+        disk_total_gb = self.disk_total_gb
+        disk_free_gb = self.disk_free_gb
+        disk_read_mbps = self.disk_read_mbps
+        disk_write_mbps = self.disk_write_mbps
+        try:
+            usage = psutil.disk_usage(self.disk_path)
+            disk_percent = float(usage.percent)
+            disk_used_gb = usage.used / (1024 ** 3)
+            disk_total_gb = usage.total / (1024 ** 3)
+            disk_free_gb = usage.free / (1024 ** 3)
+        except Exception:
+            pass
+        try:
+            disk_io = psutil.disk_io_counters()
+            if dt > 0 and disk_io is not None and self._last_disk_io is not None:
+                read_bytes = max(0, disk_io.read_bytes - self._last_disk_io.read_bytes)
+                write_bytes = max(0, disk_io.write_bytes - self._last_disk_io.write_bytes)
+                disk_read_mbps = read_bytes / dt / (1024 ** 2)
+                disk_write_mbps = write_bytes / dt / (1024 ** 2)
+            self._last_disk_io = disk_io
+        except Exception:
+            pass
 
         # GPU and temperature change slowly and are the most expensive probes
         # (NVML / WMI) — refresh them every 3rd cycle (~6 s) instead of every
@@ -288,8 +333,16 @@ class _SysMetrics:
             self.cpu = cpu
             self.mem = mem
             self.net = net
+            self.net_rx_mbps = net_rx_mbps
+            self.net_tx_mbps = net_tx_mbps
             self.gpu = gpu
             self.tmp = tmp
+            self.disk_percent = disk_percent
+            self.disk_used_gb = disk_used_gb
+            self.disk_total_gb = disk_total_gb
+            self.disk_free_gb = disk_free_gb
+            self.disk_read_mbps = disk_read_mbps
+            self.disk_write_mbps = disk_write_mbps
 
     def _get_gpu(self) -> float:
         # pynvml — subprocess-free; initialise once and reuse the handle.
@@ -307,9 +360,14 @@ class _SysMetrics:
             except Exception:
                 self._pynvml_ok = False
 
-        # Windows: nvml.dll via ctypes (already cached in _nvml_gpu_windows)
+        # Windows: NVIDIA NVML first, then OS GPU-engine counters for adapters
+        # whose driver does not expose NVML (for example Intel/AMD integrated GPUs).
         if _OS == "Windows":
-            return _nvml_gpu_windows()
+            value = _nvml_gpu_windows()
+            if value >= 0:
+                self._gpu_provider = "NVIDIA NVML"
+                return value
+            return self._get_gpu_windows_wmi()
 
         # Linux / macOS: libnvidia-ml shared lib via ctypes — init once, reuse
         try:
@@ -335,6 +393,34 @@ class _SysMetrics:
 
         return -1.0   # N/A — zero subprocess on all platforms
 
+    def _get_gpu_windows_wmi(self) -> float:
+        if self._wmi_gpu_ok is False:
+            return -1.0
+        try:
+            if self._wmi_gpu_conn is None:
+                import wmi  # type: ignore
+                self._wmi_gpu_conn = wmi.WMI()
+            counters = self._wmi_gpu_conn.Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine()
+            values = []
+            for item in counters or []:
+                engine_name = str(getattr(item, "Name", "") or "").casefold()
+                if "_engtype_3d" not in engine_name:
+                    continue
+                try:
+                    value = float(getattr(item, "UtilizationPercentage", None))
+                except (TypeError, ValueError):
+                    continue
+                if 0.0 <= value <= 100.0:
+                    values.append(value)
+            if values:
+                self._wmi_gpu_ok = True
+                self._gpu_provider = "Windows GPU 3D engine counters"
+                return max(values)
+            self._wmi_gpu_ok = False
+        except Exception:
+            self._wmi_gpu_ok = False
+        return -1.0
+
     def _get_temp(self) -> float:
         # Share the same sensor resolver used by hardware_inventory.
         try:
@@ -354,8 +440,17 @@ class _SysMetrics:
                 "cpu": self.cpu,
                 "mem": self.mem,
                 "net": self.net,
+                "net_rx_mbps": self.net_rx_mbps,
+                "net_tx_mbps": self.net_tx_mbps,
                 "gpu": self.gpu,
                 "tmp": self.tmp,
+                "disk_percent": self.disk_percent,
+                "disk_used_gb": self.disk_used_gb,
+                "disk_total_gb": self.disk_total_gb,
+                "disk_free_gb": self.disk_free_gb,
+                "disk_read_mbps": self.disk_read_mbps,
+                "disk_write_mbps": self.disk_write_mbps,
+                "disk_path": self.disk_path,
             }
 
 
@@ -2867,6 +2962,7 @@ class MainWindow(QMainWindow):
     _access_sig = pyqtSignal(str, bool)            # live microphone/screen/keyboard/speaker access
     _app_update_check_sig = pyqtSignal(object)
     _app_update_download_sig = pyqtSignal(object)
+    _device_identity_sig = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
@@ -2888,6 +2984,7 @@ class MainWindow(QMainWindow):
         _cfg = _read_full_config()
         # Canonical product identity is code-controlled; stale preference values are ignored.
         self._assistant_name: str = "ORI"
+        self.device_identity: dict | None = None
         _display = self._assistant_name.upper()
 
         # Apply the saved UI colour BEFORE panels/stylesheets are built
@@ -3189,6 +3286,7 @@ class MainWindow(QMainWindow):
         self._weather_result_sig.connect(self._on_weather_result)
         self._location_access_sig.connect(self._on_device_location_result)
         self._location_weather_sig.connect(self._on_location_weather_result)
+        self._device_identity_sig.connect(self._apply_device_identity)
         self._location_request_inflight = False
         self._location_access_generation = 0
         self._location_generation = 0
@@ -3226,6 +3324,7 @@ class MainWindow(QMainWindow):
         self._weather_refresh_timer = QTimer(self)
         self._weather_refresh_timer.timeout.connect(self._refresh_saved_weather)
         self._weather_refresh_timer.start(15 * 60 * 1000)
+        QTimer.singleShot(500, self._detect_device_identity)
         QTimer.singleShot(1400, self._refresh_weather_if_enabled)
         QTimer.singleShot(2400, self._maybe_prompt_startup_location)
 
@@ -3818,6 +3917,15 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        # Preserve essential CPU/RAM/NET/GPU/DSK chips at the minimum window width.
+        # Optional weather, date and temperature collapse first on narrower windows.
+        width = self.width()
+        if hasattr(self, "_top_temp_lbl"):
+            self._top_temp_lbl.setVisible(width >= 1180)
+        if hasattr(self, "_top_weather_lbl"):
+            self._top_weather_lbl.setVisible(width >= 1360)
+        if hasattr(self, "_date_lbl"):
+            self._date_lbl.setVisible(width >= 1160)
         cw = self.centralWidget()
         if self._overlay and self._overlay.isVisible():
             ow, oh = 560, 470
@@ -3895,12 +4003,70 @@ class MainWindow(QMainWindow):
         net_pct = min(100, net * 10)  # 10 MB/s = %100
         self._bar_net.set_value(net_pct, net_str)
 
+        # Live network throughput. This is actual computer interface traffic,
+        # not an ISP bandwidth test.
+        rx_mbps = float(snap.get("net_rx_mbps", 0.0) or 0.0)
+        tx_mbps = float(snap.get("net_tx_mbps", 0.0) or 0.0)
+        if hasattr(self, "_top_net_lbl"):
+            self._top_net_lbl.set_metric(
+                rx_mbps + tx_mbps,
+                f"↓{rx_mbps:.1f} ↑{tx_mbps:.1f}",
+                getattr(self, "_metrics_display_mode", "both"),
+                tooltip=(
+                    "Live computer network traffic, not an internet speed test. "
+                    f"Download: {rx_mbps:.2f} Mbps · Upload: {tx_mbps:.2f} Mbps"
+                ),
+                max_value=100.0,
+            )
+
         # GPU
         gpu = snap["gpu"]
         if gpu >= 0:
             self._bar_gpu.set_value(gpu, f"{gpu:.0f}%")
+            if hasattr(self, "_top_gpu_lbl"):
+                provider = getattr(_metrics, "_gpu_provider", None) or "GPU telemetry"
+                self._top_gpu_lbl.set_metric(
+                    gpu, f"{gpu:.0f}%",
+                    getattr(self, "_metrics_display_mode", "both"),
+                    tooltip=f"GPU utilisation: {gpu:.1f}% · Source: {provider}",
+                )
         else:
             self._bar_gpu.set_value(0, "N/A")
+            if hasattr(self, "_top_gpu_lbl"):
+                self._top_gpu_lbl.set_metric(
+                    None, "N/A", getattr(self, "_metrics_display_mode", "both"),
+                    tooltip=(
+                        "GPU utilisation is unavailable. NVIDIA NVML or Windows GPU "
+                        "3D-engine counters were not exposed by the active driver."
+                    ),
+                )
+
+        # System volume usage
+        raw_disk_percent = snap.get("disk_percent")
+        disk_percent = float(raw_disk_percent) if raw_disk_percent is not None else -1.0
+        if hasattr(self, "_top_disk_lbl"):
+            if disk_percent >= 0:
+                used = snap.get("disk_used_gb")
+                total = snap.get("disk_total_gb")
+                free = snap.get("disk_free_gb")
+                read_rate = float(snap.get("disk_read_mbps", 0.0) or 0.0)
+                write_rate = float(snap.get("disk_write_mbps", 0.0) or 0.0)
+                disk_detail = (
+                    f"System volume {snap.get('disk_path')}: {disk_percent:.1f}% used"
+                    + (f" ({used:.1f}/{total:.1f} GB; {free:.1f} GB free)" if used is not None and total is not None and free is not None else "")
+                    + f" · Disk read {read_rate:.2f} MB/s · write {write_rate:.2f} MB/s"
+                )
+                self._top_disk_lbl.set_metric(
+                    disk_percent, f"{disk_percent:.0f}%",
+                    getattr(self, "_metrics_display_mode", "both"),
+                    tooltip=disk_detail,
+                    warning=disk_percent >= 95,
+                )
+            else:
+                self._top_disk_lbl.set_metric(
+                    None, "N/A", getattr(self, "_metrics_display_mode", "both"),
+                    tooltip="System volume usage could not be read.",
+                )
 
         # TMP
         tmp = snap["tmp"]
@@ -4173,12 +4339,19 @@ class MainWindow(QMainWindow):
             self._metrics_display_mode = "both"
         self._top_cpu_lbl = MetricChip("CPU", C.PRI, 72)
         self._top_ram_lbl = MetricChip("RAM", C.PRI, 72)
+        self._top_net_lbl = MetricChip("NET", C.PRI, 104)
+        self._top_gpu_lbl = MetricChip("GPU", C.PRI, 68)
+        self._top_disk_lbl = MetricChip("DSK", C.PRI, 68)
         self._top_temp_lbl = MetricChip("TEMP", C.PRI, 84)
         self._top_weather_lbl = _top_chip(
             "WX OFF", 72,
             "Weather is off until you enable it in Settings."
         )
-        for _chip in (self._top_cpu_lbl, self._top_ram_lbl, self._top_temp_lbl, self._top_weather_lbl):
+        for _chip in (
+            self._top_cpu_lbl, self._top_ram_lbl, self._top_net_lbl,
+            self._top_gpu_lbl, self._top_disk_lbl, self._top_temp_lbl,
+            self._top_weather_lbl,
+        ):
             row.addWidget(_chip)
 
         self._clock_lbl = QLabel("--:--")
@@ -6719,6 +6892,37 @@ class MainWindow(QMainWindow):
         if self.on_text_command:
             threading.Thread(target=self.on_text_command, args=(msg,), daemon=True).start()
 
+    def _detect_device_identity(self) -> None:
+        """Read device model information off the UI thread; no serials or device IDs."""
+        def worker():
+            try:
+                from core.device_identity import get_device_identity
+                result = get_device_identity()
+            except Exception as exc:
+                result = {
+                    "ok": False, "form_factor": "PC", "manufacturer": None,
+                    "model": None, "label": "PC · model unavailable",
+                    "source": f"device detection failed: {type(exc).__name__}",
+                }
+            self._device_identity_sig.emit(result)
+
+        threading.Thread(target=worker, name="ori-device-identity", daemon=True).start()
+
+    def _apply_device_identity(self, result: object) -> None:
+        data = result if isinstance(result, dict) else {}
+        self.device_identity = dict(data)
+        label = str(data.get("label") or "PC · model unavailable")
+        if len(label) > 54:
+            label = label[:51].rstrip() + "…"
+        widget = getattr(self, "_device_identity_lbl", None)
+        if widget is not None:
+            widget.setText("DEVICE: " + label)
+            widget.setToolTip(
+                f"Detected device: {data.get('label') or 'model unavailable'}\n"
+                f"Detection source: {data.get('source') or 'not available'}\n"
+                "ORI does not collect serial numbers, MAC addresses or product keys."
+            )
+
     def _build_footer(self) -> QWidget:
         w = QFrame()
         w.setObjectName("TerminalFooter")
@@ -6731,7 +6935,12 @@ class MainWindow(QMainWindow):
         left.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         lay.addWidget(left)
         lay.addStretch(1)
-        right = QLabel("ORI 3.5.0 // LIVE DESKTOP")
+        self._device_identity_lbl = QLabel("DEVICE: DETECTING…")
+        self._device_identity_lbl.setFont(QFont(UI_FONT, 7, QFont.Weight.Bold))
+        self._device_identity_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        self._device_identity_lbl.setMaximumWidth(450)
+        lay.addWidget(self._device_identity_lbl)
+        right = QLabel(f"ORI {APP_VERSION} // LIVE DESKTOP")
         right.setFont(QFont(UI_FONT, 7, QFont.Weight.Bold))
         right.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent;")
         lay.addWidget(right)

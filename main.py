@@ -1022,6 +1022,19 @@ class JarvisLive:
         )
 
         # Identity injection — overrides any hardcoded name in prompt.txt
+        # Hardware identity is read-only OS data provided by the HUD when available.
+        # Never infer or invent a model if Windows has not exposed one.
+        _device_info = getattr(self.ui, "device_identity", None)
+        device_ctx = ""
+        if isinstance(_device_info, dict) and _device_info.get("ok"):
+            device_ctx = (
+                "[THIS COMPUTER — DETECTED HARDWARE]\n"
+                f"Form factor: {_device_info.get('form_factor') or 'PC'}\n"
+                f"Manufacturer: {_device_info.get('manufacturer') or 'Unavailable'}\n"
+                f"Model: {_device_info.get('model') or 'Unavailable'}\n"
+                "These are read-only OS-reported details. Do not guess missing specifications. "
+                "Use the hardware_inventory tool for a fresh full inventory.\n\n"
+            )
         # Address form is a property of the language being spoken, so it is
         # stated as a principle rather than a two-language lookup — the model
         # already knows the respectful register of whatever language it is in.
@@ -1030,7 +1043,8 @@ class JarvisLive:
                  else "ADDRESS: Use a natural, respectful tone in the user's language. "
                       "Do not default to 'sir', an honorific, or the user's name in every reply.")
         identity_ctx = (
-            f"[IDENTITY]\n"
+            device_ctx
+            + f"[IDENTITY]\n"
             f"Your name is {self._asst_name}. "
             f"Always refer to yourself as {self._asst_name}.\n"
             f"{_addr}\n"
@@ -1490,8 +1504,22 @@ class JarvisLive:
     async def _listen_audio(self):
         print("[ORI] 🎤 Mic started")
         loop = asyncio.get_event_loop()
+        last_input_status_log = [0.0]
 
         def callback(indata, frames, time_info, status):
+            # Sounddevice reports input overflows when the callback cannot keep
+            # up with the device. Throttle warnings so they remain useful rather
+            # than flooding the user's activity log.
+            if status:
+                now = time.monotonic()
+                if now - last_input_status_log[0] >= 15.0:
+                    last_input_status_log[0] = now
+                    detail = str(status).strip()[:180]
+                    if detail:
+                        loop.call_soon_threadsafe(
+                            self.ui.write_log,
+                            f"SYS: Microphone stream warning: {detail}. Audio transcription may be affected.",
+                        )
             with self._speaking_lock:
                 jarvis_speaking = self._is_speaking
 

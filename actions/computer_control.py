@@ -228,29 +228,47 @@ def _type_chunks(text: str, *, interval: float = 0.018, chunk_size: int = 8) -> 
     return sent, False
 
 
-def _type(text: str, interval: float = 0.03) -> str:
-    if _action_cancelled():
-        return "Typing cancelled before it started."
-    sent, cancelled = _type_chunks(str(text or ""), interval=interval, chunk_size=6)
+def _typing_feedback(sent: int, total: int, *, cancelled: bool = False, cleared: bool = False) -> str:
+    action = "Clear-and-type" if cleared else "Typing"
     if cancelled:
-        return f"Typing stopped by the user after {sent}/{len(str(text or ''))} characters."
-    return f"Typed: {str(text)[:60]}{'…' if len(str(text)) > 60 else ''}"
+        return (
+            f"{action} was interrupted after {sent}/{total} characters were sent. "
+            "The destination field was not read back; its final contents are unverified."
+        )
+    if sent == 0:
+        return "No keyboard text was sent."
+    return (
+        f"Keyboard input sent: {sent}/{total} characters. "
+        "The destination field was not read back, so exact text placement is unverified."
+    )
+
+
+def _type(text: str, interval: float = 0.03) -> str:
+    value = str(text or "")
+    if not value:
+        return "No text was provided; nothing was typed."
+    if _action_cancelled():
+        return "Typing cancelled before it started; no keyboard text was sent."
+    sent, cancelled = _type_chunks(value, interval=interval, chunk_size=6)
+    return _typing_feedback(sent, len(value), cancelled=cancelled)
 
 
 def _smart_type(text: str, clear_first: bool = True) -> str:
+    value = str(text or "")
+    if not value:
+        return "No text was provided; nothing was typed."
     _require_pyautogui()
-    text = str(text or "")
     if _action_cancelled():
-        return "Typing cancelled before it started."
+        return "Typing cancelled before it started; no keyboard text was sent."
     if clear_first:
         _clear_field()
         if _ACTION_CANCEL.wait(0.05):
-            return "Typing cancelled after clearing the field; no text was entered."
-
-    sent, cancelled = _type_chunks(text, interval=0.025, chunk_size=28)
-    if cancelled:
-        return f"Typing stopped by the user after {sent}/{len(text)} characters."
-    return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
+            return (
+                "The clear-field shortcut was sent, then typing was cancelled. "
+                "The destination contents are unverified."
+            )
+    sent, cancelled = _type_chunks(value, interval=0.025, chunk_size=28)
+    return _typing_feedback(sent, len(value), cancelled=cancelled, cleared=clear_first)
 
 
 def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
@@ -388,7 +406,7 @@ def _clipboard_paste(text: str) -> str:
         _require_pyautogui()
         paste_key = "command" if _get_os() == "mac" else "ctrl"
         pyautogui.hotkey(paste_key, "v")
-        return f"Pasted: {text[:60]}{'…' if len(text) > 60 else ''}"
+        return "Paste shortcut sent. The destination contents were not read back, so paste placement is unverified."
     return "pyperclip not available"
 
 
@@ -684,7 +702,7 @@ def computer_control(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
-    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen, and gracefully close a named window with post-close verification. Never claim an app closed from Alt+F4 alone; use close_window.",
+    "description": "Direct computer control. For type/smart_type/paste, use only literal user-supplied or explicitly confirmed text; never guess or rewrite speech. These actions report keyboard input sent, not verified destination contents. Ask the user to repeat or confirm unclear dictated text before calling them. Window closing is graceful and post-close verified."
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -694,7 +712,7 @@ TOOL = {
             },
             "text": {
                 "type": "STRING",
-                "description": "Text to type or paste"
+                "description": "Exact literal text supplied or explicitly confirmed by the user. Preserve wording, spelling and punctuation; do not infer or autocorrect."
             },
             "x": {
                 "type": "INTEGER",
