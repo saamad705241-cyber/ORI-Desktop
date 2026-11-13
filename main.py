@@ -950,6 +950,7 @@ class JarvisLive:
         self._barge_audio_buffer.clear()
         self._tool_voice_buffer.clear()
         self._action_voice_run = 0
+        self._audio_output_primed = False
         q = self.audio_in_queue
         if q:
             drained = 0
