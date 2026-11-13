@@ -3426,6 +3426,10 @@ class MainWindow(QMainWindow):
         for p in (self._video_player, self._video_sound):
             if p:
                 try:
+                    p.setPlaybackRate(1.0)
+                except Exception:
+                    pass
+                try:
                     p.stop()
                 except Exception:
                     pass
