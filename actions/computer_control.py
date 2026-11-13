@@ -708,7 +708,7 @@ def computer_control(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
-    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen.",
+    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements, focus windows, and gracefully close a uniquely identified window. Use close_window for app closing; it verifies that the target process has no visible windows and never force-kills unsaved work.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
