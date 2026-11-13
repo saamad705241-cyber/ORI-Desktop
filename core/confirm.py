@@ -142,10 +142,16 @@ def resolve(accepted: bool) -> None:
 
     def _worker():
         try:
-            result = p.run() or "Done."
-            _log(f"SYS: Confirmed — {p.title}. {result}")
+            result = p.run()
+            if result is None or (isinstance(result, str) and not result.strip()):
+                _log(
+                    f"ERR: Confirmation accepted for {p.title}, but the action returned "
+                    "no confirmation. Outcome is unverified; do not report success."
+                )
+                return
+            _log(f"SYS: Confirmation accepted — {p.title}. Action result: {result}")
         except Exception as e:
-            _log(f"ERR: {p.title} failed — {e}")
+            _log(f"ERR: {p.title} failed — {type(e).__name__}: {e}")
 
     threading.Thread(target=_worker, daemon=True,
                      name=f"confirm-{p.key}").start()
