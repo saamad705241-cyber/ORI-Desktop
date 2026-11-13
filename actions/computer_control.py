@@ -265,7 +265,85 @@ def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
 def _hotkey(*keys) -> str:
     _require_pyautogui()
     pyautogui.hotkey(*keys)
-    return f"Hotkey: {'+'.join(keys)}"
+    shortcut = "+".join(str(key) for key in keys)
+    return (
+        f"Keyboard shortcut sent: {shortcut}. The resulting application state "
+        "has not been verified; use a state-specific action when confirmation is required."
+    )
+
+
+def _close_window(title: str, timeout: float = 5.0, poll_interval: float = 0.1) -> str:
+    """Request a graceful window close and verify that the same window disappears.
+
+    Never terminate a process. A window that remains after WM_CLOSE may be showing
+    an unsaved-changes prompt or may have denied the close request.
+    """
+    target = str(title or "").strip()
+    if not target:
+        return "No window title was supplied; no window was closed."
+
+    if _get_os() != "windows":
+        return (
+            "Verified graceful window closing is currently supported only on Windows. "
+            "No close action was sent."
+        )
+
+    try:
+        import pygetwindow as gw
+    except Exception as exc:
+        return f"Window closing is unavailable because pygetwindow could not load: {type(exc).__name__}: {exc}"
+
+    try:
+        matches = [
+            window for window in gw.getAllWindows()
+            if getattr(window, "title", "").strip()
+            and target.casefold() in window.title.casefold()
+            and bool(getattr(window, "visible", True))
+        ]
+    except Exception as exc:
+        return f"Could not inspect open windows: {type(exc).__name__}: {exc}"
+
+    if not matches:
+        return f"No visible window matched '{target}'. Nothing was closed."
+
+    handles = {
+        getattr(window, "_hWnd", None) or getattr(window, "hWnd", None)
+        for window in matches
+    }
+    handles.discard(None)
+    errors = []
+    for window in matches:
+        try:
+            window.close()
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    remaining = matches
+    while time.monotonic() < deadline:
+        try:
+            current = gw.getAllWindows()
+            remaining = [
+                window for window in current
+                if (
+                    (getattr(window, "_hWnd", None) or getattr(window, "hWnd", None)) in handles
+                    if handles else target.casefold() in getattr(window, "title", "").casefold()
+                )
+                and bool(getattr(window, "visible", True))
+            ]
+        except Exception:
+            remaining = matches
+        if not remaining:
+            return f"Closed '{target}'. Verified: the target window disappeared."
+        time.sleep(max(0.01, float(poll_interval)))
+
+    detail = " The close request returned an error: " + "; ".join(errors[:2]) if errors else ""
+    return (
+        f"Close was requested for '{target}', but its window is still present. "
+        "The close is unverified and may be blocked by an unsaved-changes prompt. "
+        "No process was force-terminated."
+        + detail
+    )
 
 
 def _press(key: str) -> str:
@@ -335,15 +413,25 @@ def _focus_window(title: str) -> str:
 
     if os_name == "windows":
         try:
-            script = f'(New-Object -ComObject WScript.Shell).AppActivate("{title}")'
-            subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True, timeout=5, **_WIN_HIDE,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
+            import pygetwindow as gw
+            matches = [
+                window for window in gw.getAllWindows()
+                if title.casefold() in getattr(window, "title", "").casefold()
+                and bool(getattr(window, "visible", True))
+            ]
+            if not matches:
+                return f"No visible window matched '{title}'."
+            matches[0].activate()
+            time.sleep(0.2)
+            try:
+                active = gw.getActiveWindow()
+            except Exception:
+                active = None
+            if active and title.casefold() in getattr(active, "title", "").casefold():
+                return f"Focused window '{title}'. Verified as the active window."
+            return f"Focus was requested for '{title}', but the active window could not be verified."
         except Exception as e:
-            return f"focus_window (Windows) failed: {e}"
+            return f"focus_window (Windows) failed: {type(e).__name__}: {e}"
 
     if os_name == "mac":
         script = (
@@ -351,14 +439,16 @@ def _focus_window(title: str) -> str:
             f'set frontmost of (first process whose name contains "{title}") to true'
         )
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["osascript", "-e", script],
-                capture_output=True, timeout=5,
+                capture_output=True, text=True, timeout=5,
             )
+            if result.returncode != 0 or result.stdout.strip().lower() not in ("true", "1"):
+                return f"Could not verify focus for '{title}': {(result.stderr or result.stdout).strip()[:240]}"
             time.sleep(0.3)
-            return f"Focused window: {title}"
+            return f"Focused window '{title}'. macOS accepted the activation request."
         except Exception as e:
-            return f"focus_window (macOS) failed: {e}"
+            return f"focus_window (macOS) failed: {type(e).__name__}: {e}"
 
     if os_name == "linux":
         try:
@@ -566,6 +656,9 @@ def computer_control(
         if action == "focus_window":
             return _focus_window(params.get("title", ""))
 
+        if action == "close_window":
+            return _close_window(params.get("title", ""))
+
         if action == "random_data":
             dt     = params.get("type", "name")
             result = _random_data(dt)
@@ -591,13 +684,13 @@ def computer_control(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
-    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen.",
+    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen, and gracefully close a named window with post-close verification. Never claim an app closed from Alt+F4 alone; use close_window.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | screen_find | screen_click | random_data | user_data"
+                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_window | screen_find | screen_click | random_data | user_data"
             },
             "text": {
                 "type": "STRING",
