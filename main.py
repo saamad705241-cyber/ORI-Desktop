@@ -1251,7 +1251,7 @@ class JarvisLive:
             active.add("files")
         if lowered == "computer_control":
             action = str(args.get("action", "")).lower()
-            if action in {"type", "smart_type", "hotkey", "press", "clear_field", "paste"}:
+            if action in {"type", "smart_type", "hotkey", "press", "clear_field", "paste", "close_window"}:
                 active.add("keyboard")
             if action in {"click", "left_click", "double_click", "right_click", "move", "drag", "scroll", "screen_click"}:
                 active.add("mouse")
