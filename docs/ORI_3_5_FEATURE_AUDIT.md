@@ -62,3 +62,10 @@ The repository does not currently establish complete end-to-end implementations 
 5. Replace the three-step updater UI with one sequential check → download → SHA-256 verify → confirm install/restart action.
 6. Run a clean Windows package smoke test and user-side acceptance tests. Record every pass/fail; do not treat source-only tests as live verification.
 7. Only then create the user-facing Windows installer. Future in-app updates should be delivered by ORI's updater, not by asking users to download ZIP files.
+
+
+## Additional updater safety note
+
+The public test build used in the 13 November 2026 user-side check carried version 3.5.2, matching the latest published GitHub release tag v3.5.2. Therefore the updater correctly displayed **ORI is up to date**; this did not exercise download or install. A real end-to-end update test needs a higher versioned release asset.
+
+The self-update helper excludes `api_keys.json` from the staged file copy, preserving the user's configured API key during the in-place update. It creates a rollback copy before replacing program files and verifies the installed executable hash. The updater tests assert that secret-preservation exclusion remains in the helper.
