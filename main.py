@@ -1305,7 +1305,7 @@ class JarvisLive:
             )
 
         loop   = asyncio.get_event_loop()
-        result = "Done."
+        result = "Tool did not return a confirmation; outcome is unverified."
 
         try:
             if name == "recall_memory":
@@ -1412,6 +1412,7 @@ class JarvisLive:
                     import os as _os
                     _os._exit(0)
                 asyncio.create_task(_do_shutdown())
+                result = "Shutdown was scheduled; ORI will close after the goodbye sequence."
 
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given
