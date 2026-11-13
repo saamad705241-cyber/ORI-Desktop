@@ -67,7 +67,7 @@ def _migrate_legacy_data(install_dir: Path, data_dir: Path) -> None:
     )
 
     # Preserve user-created material from older portable builds when present.
-    for name in ("downloads", "screenshots", "logs"):
+    for name in ("downloads", "screenshots", "logs", "uploads"):
         _copy_tree_once(install_dir / name, data_dir / name)
     _copy_tree_once(
         install_dir / "config" / "certs",
