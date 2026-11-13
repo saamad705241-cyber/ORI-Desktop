@@ -1305,7 +1305,10 @@ class JarvisLive:
             )
 
         loop   = asyncio.get_event_loop()
-        result = "Done."
+        result = (
+            f"Tool '{name}' did not produce a result. "
+            "The outcome is unverified; do not report the action as successful."
+        )
 
         try:
             if name == "recall_memory":
@@ -1436,7 +1439,7 @@ class JarvisLive:
                         None,
                         lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
                     )
-                    result = r if r else "Plugin returned no confirmation; outcome is unverified. Do not report success."
+                    result = r
                 else:
                     result = f"Unknown tool: {name}"
 
