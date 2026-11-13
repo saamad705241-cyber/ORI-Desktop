@@ -91,6 +91,9 @@ jobs:
           $required = @(
             "dist/ORI/ORI.exe",
             "dist/ORI/core/apply_update.ps1",
+            "dist/ORI/core/install_update.ps1",
+            "dist/ORI/core/uninstall_launcher.ps1",
+            "dist/ORI/core/app_paths.py",
             "dist/ORI/dashboard/static/app.html",
             "dist/ORI/dashboard/static/login.html",
             "dist/ORI/dashboard/static/crypto-js.js",
@@ -98,19 +101,31 @@ jobs:
             "dist/ORI/config/microphone-on.svg",
             "dist/ORI/config/microphone-muted.svg",
             "dist/ORI/config/voice-stop.svg",
+            "dist/ORI/config/api_keys.example.json",
             "dist/ORI/winrt/windows/foundation/__init__.py",
             "dist/ORI/winrt/windows/foundation/collections/__init__.py"
           )
           foreach ($path in $required) {
             if (!(Test-Path $path)) { throw "Windows package is missing required file: $path" }
           }
+          if (Test-Path "dist/ORI/config/api_keys.json") {
+            throw "The installer package must not contain a user API config."
+          }
           $env:ORI_PACKAGE_ROOT = (Resolve-Path "dist/ORI").Path
           python -I -c "import os, sys; root=os.environ['ORI_PACKAGE_ROOT']; os.add_dll_directory(root); sys.path.insert(0, root); import winrt.windows.foundation; import winrt.windows.foundation.collections; from winrt.windows.devices.geolocation import Geolocator; assert callable(Geolocator.request_access_async)"
           if ($LASTEXITCODE -ne 0) { throw "Frozen package WinRT location imports failed." }
-          Write-Host "Windows package, self-update helper, Phone Remote, WinRT location dependencies and microphone/voice assets verified."
+          choco install innosetup --yes --no-progress
+          $compiler = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$compiler) { throw "Inno Setup ISCC.exe was not found after installation." }
+          & $compiler.FullName "/DMyAppVersion=3.6.0" "installer\ORI.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+          if (!(Test-Path "dist/installer/ORI-Setup-3.6.0.exe")) { throw "ORI Setup.exe was not created." }
+          Write-Host "Windows payload and Inno Setup installer verified."
       - uses: actions/upload-artifact@v4
         with:
           name: ORI-Windows-Package-${{ github.sha }}
-          path: dist/ORI/
+          path: |
+            dist/ORI/
+            dist/installer/ORI-Setup-3.6.0.exe
           if-no-files-found: error
           retention-days: 3
