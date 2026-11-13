@@ -2732,7 +2732,7 @@ def _ensure_first_run_config() -> None:
         "wake_word_enabled": False,
         "push_to_talk_enabled": False,
         "voice_interrupt_enabled": True,
-        "github_repository": "",
+        "github_repository": "saamad705241-cyber/ORI-Desktop",
     }
     API_CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
