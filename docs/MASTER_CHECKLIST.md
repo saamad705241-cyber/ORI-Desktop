@@ -25,6 +25,7 @@ declare a final release until the acceptance checks in the final phases pass.
 
 ## ORI 3.5.2: reliable Windows self-update installation
 
+- [x] Add a one-time PowerShell bootstrap for 3.5.0/3.5.1 installs that cannot reach the repaired helper through their legacy batch updater.
 - [ ] Launch a detached PowerShell helper from the user-local update state folder.
 - [ ] Wait for the current ORI process to exit, with a bounded 120-second timeout and an actionable log.
 - [ ] Correctly exclude staged user-data directories using source-relative paths, preserving local API keys, memory, downloads, screenshots, logs and certificates.
@@ -34,7 +35,7 @@ declare a final release until the acceptance checks in the final phases pass.
 - [ ] Keep an install log under %LOCALAPPDATA%/ORI/updates/install-helper.
 - [ ] Add automated tests for helper launch, expected paths, logging, missing staged executable and helper-script safeguards.
 - [ ] Validate PowerShell syntax and build the Windows package in CI.
-- [ ] Physically verify a 3.5.0 to 3.5.2 upgrade on the ASUS laptop, including app title/version, preserved API key, memory and a successful post-update restart.
+- [ ] Physically verify a 3.5.0 to 3.5.2 upgrade on the ASUS laptop using the bootstrap, including app title/version, preserved API key, memory and a successful post-update restart.
 
 ## ORI 3.5.1: CPU temperature, startup location and microphone/voice controls
 
