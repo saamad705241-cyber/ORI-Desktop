@@ -356,6 +356,7 @@ class _SysMetrics:
                     self._pynvml    = pynvml
                     self._pynvml_h  = pynvml.nvmlDeviceGetHandleByIndex(0)
                     self._pynvml_ok = True
+                self._gpu_provider = "NVIDIA NVML"
                 return float(self._pynvml.nvmlDeviceGetUtilizationRates(self._pynvml_h).gpu)
             except Exception:
                 self._pynvml_ok = False
@@ -7797,6 +7798,11 @@ class JarvisUI:
     def muted(self, v: bool):
         if v != self._win._muted:
             self._win._toggle_mute()
+
+    @property
+    def device_identity(self) -> dict | None:
+        """Read-only hardware identity detected by the main window."""
+        return self._win.device_identity
 
     def set_muted_from_remote(self, muted: bool | None = None) -> bool:
         """Expose remote microphone control through the public JarvisUI facade."""
