@@ -1,5 +1,13 @@
 # ORI Changelog
 
+## 3.5.4 (14 November 2026)
+
+- Fix Windows clipboard timing so successive text batches are not pasted before the target application consumes the prior clipboard payload.
+- Preserve Devanagari conjuncts and Unicode combining marks by splitting only at grapheme boundaries.
+- Increase the normal typing batch size to reduce clipboard handoffs.
+- Allow natural Hinglish code-switching while preserving Roman Hindi, Devanagari and supplied English wording in exact-text actions.
+- Add regression tests for clipboard settling, Indic grapheme boundaries and Hinglish prompt behavior.
+
 ## 3.5.2 (13 November 2026)
 
 - Fix the Windows self-update handoff so a detached installer logs progress, waits for ORI to exit with a timeout, copies staged files using source-relative user-data exclusions, verifies the installed executable SHA-256, and restarts ORI.

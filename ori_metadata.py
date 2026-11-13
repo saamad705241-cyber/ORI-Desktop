@@ -11,7 +11,7 @@ normal users cannot edit it through Settings.
 # ---------------------------------------------------------------------------
 
 APP_NAME = "ORI"
-APP_VERSION = "3.5.3"
+APP_VERSION = "3.5.4"
 APP_RELEASE_LABEL = f"ORI {APP_VERSION}"
 APP_MODEL_LABEL = f"ORI Core {'.'.join(APP_VERSION.split('.')[:2])}"  # Product/runtime identity, not a foundation-model claim.
 BUILD_DATE = "14 November 2026"
