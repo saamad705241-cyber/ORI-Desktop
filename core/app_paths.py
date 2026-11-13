@@ -39,10 +39,17 @@ def _copy_file_once(source: Path, destination: Path) -> None:
 
 
 def _copy_tree_once(source: Path, destination: Path) -> None:
-    if not source.is_dir() or destination.exists():
+    if not source.is_dir():
         return
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, destination)
+    for source_file in source.rglob("*"):
+        if not source_file.is_file():
+            continue
+        relative = source_file.relative_to(source)
+        destination_file = destination / relative
+        if destination_file.exists():
+            continue
+        destination_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, destination_file)
 
 
 def _migrate_legacy_data(install_dir: Path, data_dir: Path) -> None:
