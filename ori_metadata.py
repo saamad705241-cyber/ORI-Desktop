@@ -83,13 +83,17 @@ Available feature areas in this source
 - Read-only desktop overview and bounded Windows Update diagnostics.
 - Live CPU/RAM, network throughput, GPU utilisation and system-volume usage in the HUD, plus detected device model; temperature remains optional.
 
-Windows update capability in this candidate
-- The Settings CHECK & UPDATE flow checks the GitHub release, downloads the versioned Windows package, verifies its SHA-256 checksum, stages the update and schedules installation/restart.
-- The release workflow creates a versioned GitHub release and matching checksum after the candidate is merged to the main branch. This candidate is not a published release yet.
-- The full update and restart must be tested from an installed previous version before the updater is considered end-to-end verified.
-- The final single-file installer remains a later phase.
+Windows installer and update capability in this candidate
+- Windows distribution uses a per-user Inno Setup installer around the PyInstaller application bundle. The bundle includes its Python interpreter and required Python packages, so end users do not need to install Python, Java or Node.js.
+- Setup creates a Start Menu shortcut, offers an optional Desktop shortcut and registers a normal Windows uninstaller. Settings also contains an uninstall action with a personal-data retention notice.
+- API credentials, preferences and long-term memory are stored separately under %LOCALAPPDATA%\\ORI and are preserved when the program is updated or uninstalled. Existing portable config and memory are migrated without overwriting newer user data.
+- Settings separates Check for Updates, Download Update and Install Update. Checking does not download anything; the installer downloads only after the user presses Download Update, and SHA-256 is verified before Install Update becomes available.
+- Install Update runs the verified Setup executable through a detached helper, checks a startup-ready marker and restores the previous program if the new installation fails.
+- A successful CI build is not a substitute for clean-machine Windows installation, update, rollback and uninstall testing. This candidate is not publicly release-verified until those tests pass.
 
 Coming soon / not enabled in this build
+- Analog motorcycle-style live network speedometer showing upload/download KB/s or MB/s and data totals.
+- Complete voice-controlled media transport for play, pause, resume, next, previous, seek, volume and playlists.
 - Account sign-in and cloud profile synchronization.
 - Additional remote features are labelled as coming soon until their end-to-end tests pass.
 """
