@@ -56,3 +56,20 @@ def test_volume_set_does_not_claim_success_when_readback_is_missing(monkeypatch)
     })
 
     assert "result is unverified" in result
+
+
+def test_irreversible_restart_still_requests_confirmation_without_pyautogui(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(computer_settings, "_PYAUTOGUI", False)
+    monkeypatch.setitem(computer_settings.ACTION_MAP, "restart", lambda: "Restart scheduled by the OS.")
+    monkeypatch.setattr(
+        computer_settings.confirm,
+        "request",
+        lambda **kwargs: captured.update(kwargs) or "[CONFIRMATION_PENDING]",
+    )
+
+    result = computer_settings.computer_settings({"action": "restart"})
+
+    assert result == "[CONFIRMATION_PENDING]"
+    assert captured["key"] == "restart"
+    assert captured["run"]() == "Restart scheduled by the OS."
