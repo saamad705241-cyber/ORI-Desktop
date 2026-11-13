@@ -774,7 +774,7 @@ def _update_epic_games(epic_exe: Path, game_name: str = None) -> str:
                 subprocess.Popen([str(epic_exe), url] if epic_exe else ["xdg-open", url])
             else:
                 subprocess.Popen([str(epic_exe), url])
-            return f"Opened Epic for '{matched[0]['name']}'."
+            return (f"Sent Epic a launch request for '{matched[0]['name']}'. " "Epic did not confirm that the game opened or updated.")
         except Exception as e:
             return f"Epic update failed: {e}"
     else:
@@ -794,12 +794,12 @@ def _update_epic_games(epic_exe: Path, game_name: str = None) -> str:
                         subprocess.Popen([str(epic_exe),
                             f"com.epicgames.launcher://apps/{g['id']}?action=launch&silent=true"])
                         time.sleep(0.5)
-                    return f"Triggered update check for {len(games)} Epic game(s)."
+                    return f"Requested an Epic update check for {len(games)} game(s); update completion was not verified."
                 else:
                     subprocess.Popen([str(epic_exe)])
             count = len(games)
-            return (f"Epic Games Launcher opened. {count} game(s) will be checked."
-                    if count else "Epic Games Launcher opened.")
+            return (f"Epic Games Launcher launch request sent. {count} game(s) may be checked, but the result was not verified."
+                    if count else "Epic Games Launcher launch request sent; startup was not verified.")
         except Exception as e:
             return f"Epic launch failed: {e}"
 
