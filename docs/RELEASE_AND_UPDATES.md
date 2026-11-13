@@ -48,3 +48,20 @@ For an already installed packaged ORI, the user does not need to download the re
 ## Windows self-update installation helper
 
 The packaged update installer is copied to `%LOCALAPPDATA%/ORI/updates/install-helper` before ORI exits. It writes a transcript log there, waits up to 120 seconds for the current process to close, backs up the existing program files, copies the staged package while excluding user-data folders and `api_keys.json`, compares the staged and installed `ORI.exe` SHA-256 values, and starts the new executable. If copying, verification or immediate startup fails, it attempts to restore and restart the previous build. The UI reports the log path; a completed download or a started helper is not itself reported as a completed installation.
+
+
+## One-time bootstrap for legacy 3.5.0 / 3.5.1 installs
+
+The 3.5.0 and 3.5.1 packages contain the original batch updater. If that updater fails to replace the running executable, the installed build cannot reliably update itself to the repaired updater in 3.5.2.
+
+Run scripts/bootstrap_update.ps1 once from PowerShell while exactly one installed ORI.exe window is open. The script detects the running executable path, downloads the latest official Windows ZIP and SHA-256 sidecar, verifies the digest, extracts the package, launches its bundled core/apply_update.ps1, and requests a graceful close of the old ORI process. The new helper backs up the old files, replaces and verifies ORI.exe, and restarts ORI, with rollback on failure.
+
+Copy/run command after the bootstrap script is merged:
+
+    $script = Join-Path $env:TEMP "ori-bootstrap-update.ps1"
+    Invoke-WebRequest "https://raw.githubusercontent.com/saamad705241-cyber/ORI-Desktop/main/scripts/bootstrap_update.ps1" -OutFile $script
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script
+
+Run this as the same Windows user that launched ORI, without starting PowerShell as Administrator unless ORI itself is installed in a protected administrator-only folder. Keep ORI open while starting the script; it detects the live ORI.exe path rather than guessing an installation directory.
+
+The install log is written under %LOCALAPPDATA%/ORI/updates/install-helper. The bootstrap downloads the full Windows package automatically, so no manual ZIP extraction or file copying is needed. After the first successful bootstrap to 3.5.2, use ORI's normal built-in updater for future releases.

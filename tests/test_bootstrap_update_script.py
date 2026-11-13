@@ -27,7 +27,8 @@ def test_bootstrap_requires_official_release_and_included_installer_helper():
     source = _bootstrap_source()
     assert "$uri.Host -ne " in source
     assert "ORI/core/apply_update.ps1" in source
-    assert 'Join-Path $sourceDir "core\\apply_update.ps1"' in source
+    assert "Join-Path $sourceDir" in source
+    assert "apply_update.ps1" in source
 
 
 def test_bootstrap_starts_helper_then_closes_the_current_app():

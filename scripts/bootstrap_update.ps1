@@ -3,6 +3,7 @@ param()
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Repository = "saamad705241-cyber/ORI-Desktop"
 $ApiVersion = "2022-11-28"
 
