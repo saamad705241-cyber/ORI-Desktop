@@ -20,4 +20,4 @@ def audio_sync_action(
         return 1.0, False
     if magnitude >= max(soft_limit_ms + 1.0, hard_limit_ms):
         return 1.0, True
-    return (0.98 if drift > 0 else 1.02), False
+    return (0.995 if drift > 0 else 1.005), False
