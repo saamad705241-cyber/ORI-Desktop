@@ -19,6 +19,7 @@ from ori_metadata import APP_VERSION
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 _SETUP_RE = re.compile(r"^ORI-Setup-(\d+(?:\.\d+){1,2})\.exe$", re.IGNORECASE)
+DEFAULT_REPOSITORY = "saamad705241-cyber/ORI-Desktop"
 _MAX_DOWNLOAD = 700 * 1024 * 1024
 
 
