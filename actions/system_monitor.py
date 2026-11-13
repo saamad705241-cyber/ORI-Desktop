@@ -83,30 +83,14 @@ def _get_gpu_usage() -> float:
 
 
 def _get_cpu_temp() -> float:
-    # psutil — works on Linux; occasionally Windows with proper drivers
+    """Read the same validated temperature source used by the desktop HUD."""
     try:
-        temps = psutil.sensors_temperatures()
-        for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
-                     "cpu-thermal", "zenpower", "it8688"]:
-            if name in temps and temps[name]:
-                return temps[name][0].current
-        for entries in temps.values():
-            if entries:
-                return entries[0].current
+        from core.hardware_sensors import get_cpu_temperature
+        reading = get_cpu_temperature()
+        if reading and reading.get("temperature_c") is not None:
+            return float(reading["temperature_c"])
     except Exception:
         pass
-
-    # Windows: wmi module (pure Python COM, zero subprocess)
-    if _OS == "Windows":
-        try:
-            import wmi  # type: ignore
-            w = wmi.WMI(namespace="root/wmi")
-            tz = w.MSAcpi_ThermalZoneTemperature()
-            if tz:
-                return (tz[0].CurrentTemperature / 10.0) - 273.15
-        except Exception:
-            pass
-
     return -1.0
 
 
