@@ -51,7 +51,7 @@ try {
     Write-Output "Running the SHA-256-verified ORI Setup installer silently."
     $arguments = @(
         "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
-        "/CLOSEAPPLICATIONS", "/DIR=$InstallDir"
+        "/CLOSEAPPLICATIONS", "/DIR=`"$InstallDir`""
     )
     $setup = Start-Process -FilePath $InstallerPath -ArgumentList $arguments -Wait -PassThru
     if ($setup.ExitCode -ne 0) { throw "ORI Setup exited with code $($setup.ExitCode)." }
