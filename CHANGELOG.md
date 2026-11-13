@@ -1,5 +1,17 @@
 # ORI Changelog
 
+## 3.6.0 (14 November 2026)
+
+- Add a per-user Windows Setup installer that bundles the application runtime and dependencies, creates Start Menu and optional Desktop shortcuts, and registers a Windows uninstaller.
+- Move API credentials, preferences, long-term memory and user-created data out of program files so upgrades and uninstall preserve them; migrate existing portable config and memory without overwriting newer user data.
+- Split in-app updates into explicit Check for Updates, Download Update and Install Update actions. Downloaded Setup executables are SHA-256 verified and are never installed until the user confirms.
+- Replace ZIP file-copy updates with a detached Setup helper that backs up program files, installs in place, verifies the updated application's startup marker, and restores the previous program if installation or startup fails.
+- Add a Settings uninstall action with a clear personal-data retention notice.
+- Add bounded PCM jitter buffering, safe mic-queue overflow handling and PortAudio error recovery for Gemini Live voice output.
+- Reduce split-stream video/audio resynchronization seeks to prevent repeated soundtrack interruptions.
+
+
+
 ## 3.5.4 (14 November 2026)
 
 - Fix Windows clipboard timing so successive text batches are not pasted before the target application consumes the prior clipboard payload.
