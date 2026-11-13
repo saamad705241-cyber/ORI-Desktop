@@ -25,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pytest ruff
-          python -c "from winrt.windows.devices.geolocation import Geolocator; assert callable(Geolocator.request_access_async)"
+          python -c "import winrt.windows.foundation; import winrt.windows.foundation.collections; from winrt.windows.devices.geolocation import Geolocator; assert callable(Geolocator.request_access_async)"
       - name: Validate Windows update helper syntax
         shell: pwsh
         run: |
@@ -97,12 +97,17 @@ jobs:
             "dist/ORI/dashboard/static/crypto-js-LICENSE.txt",
             "dist/ORI/config/microphone-on.svg",
             "dist/ORI/config/microphone-muted.svg",
-            "dist/ORI/config/voice-stop.svg"
+            "dist/ORI/config/voice-stop.svg",
+            "dist/ORI/winrt/windows/foundation/__init__.py",
+            "dist/ORI/winrt/windows/foundation/collections/__init__.py"
           )
           foreach ($path in $required) {
             if (!(Test-Path $path)) { throw "Windows package is missing required file: $path" }
           }
-          Write-Host "Windows package, self-update helper, Phone Remote, location runtime and microphone/voice assets verified."
+          $env:ORI_PACKAGE_ROOT = (Resolve-Path "dist/ORI").Path
+          python -I -c "import os, sys; root=os.environ['ORI_PACKAGE_ROOT']; os.add_dll_directory(root); sys.path.insert(0, root); import winrt.windows.foundation; import winrt.windows.foundation.collections; from winrt.windows.devices.geolocation import Geolocator; assert callable(Geolocator.request_access_async)"
+          if ($LASTEXITCODE -ne 0) { throw "Frozen package WinRT location imports failed." }
+          Write-Host "Windows package, self-update helper, Phone Remote, WinRT location dependencies and microphone/voice assets verified."
       - uses: actions/upload-artifact@v4
         with:
           name: ORI-Windows-Package-${{ github.sha }}
