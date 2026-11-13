@@ -33,7 +33,7 @@ class DashboardRemoteTests(unittest.TestCase):
         # Simulate a laptop moving from one Wi-Fi network to another. A stale
         # certificate must not be reused for a QR URL with a different IP.
         with tempfile.TemporaryDirectory() as temp_dir:
-            with patch("dashboard.server.BASE_DIR", Path(temp_dir)):
+            with patch("dashboard.server.APP_DATA_DIR", Path(temp_dir)):
                 self.assertTrue(_ensure_certs("192.168.1.55"))
                 cert_path = Path(temp_dir) / "config" / "certs" / "jarvis.crt"
                 first_cert_bytes = cert_path.read_bytes()
