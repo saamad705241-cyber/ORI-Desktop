@@ -1,18 +1,18 @@
 # ORI Master Development Checklist
 
 This is the single source of truth for ORI's remaining development work.
-The current published baseline is ORI 3.5.0; the active patch candidate is ORI 3.5.1. Do not create a final installer or
+The current published baseline is ORI 3.5.1; the active patch candidate is ORI 3.5.2. Do not create a final installer or
 declare a final release until the acceptance checks in the final phases pass.
 
 ## Current baseline
 
 - [x] GitHub repository is published.
-- [x] ORI 3.5.0 stable release is published.
+- [x] ORI 3.5.0 and ORI 3.5.1 stable releases are published.
 - [x] GitHub CI, automated tests, Ruff checks and Gitleaks have passed.
 - [x] Windows one-folder package can be built by CI.
 - [x] The GitHub updater repository is configured.
-- [x] The user reports the current update flow is working. Do not rewrite its backend
-      without a demonstrated regression.
+- [ ] ORI 3.5.1 downloads and verifies its checksum, but the user reports that
+      install/restart leaves the old executable in place. Repair tracked in 3.5.2.
 - [x] Phone Remote QR pairing and controls work in Python/source mode.
 - [ ] Phone Remote does not become ready in the packaged Windows build.
       **DEFERRED:** keep the known issue on the backlog. Do not spend the current
@@ -22,6 +22,19 @@ declare a final release until the acceptance checks in the final phases pass.
       FA607NUQ, AMD Ryzen 7 170 (8 cores / 16 threads), 16 GB Micron RAM,
       AMD Radeon Graphics, NVIDIA GeForce RTX 4050 Laptop GPU, FA607NUQ
       motherboard, KIOXIA 512 GB SSD, Windows 11 build 26300.
+
+## ORI 3.5.2: reliable Windows self-update installation
+
+- [ ] Launch a detached PowerShell helper from the user-local update state folder.
+- [ ] Wait for the current ORI process to exit, with a bounded 120-second timeout and an actionable log.
+- [ ] Correctly exclude staged user-data directories using source-relative paths, preserving local API keys, memory, downloads, screenshots, logs and certificates.
+- [ ] Back up the existing program files before replacement.
+- [ ] Copy the staged one-folder release, verify the installed ORI.exe SHA-256 against the staged ORI.exe, then restart the new executable.
+- [ ] On copy, hash or immediate-start failure, restore the previous program files and relaunch the previous ORI build.
+- [ ] Keep an install log under %LOCALAPPDATA%/ORI/updates/install-helper.
+- [ ] Add automated tests for helper launch, expected paths, logging, missing staged executable and helper-script safeguards.
+- [ ] Validate PowerShell syntax and build the Windows package in CI.
+- [ ] Physically verify a 3.5.0 to 3.5.2 upgrade on the ASUS laptop, including app title/version, preserved API key, memory and a successful post-update restart.
 
 ## ORI 3.5.1: CPU temperature, startup location and microphone/voice controls
 
@@ -128,7 +141,7 @@ to work on this phase.
       check, download, then install and restart.
 - [ ] Show update progress and actionable failure messages.
 - [ ] Preserve user settings, API configuration and local memory during updates.
-- [ ] Keep the existing working updater backend unless testing proves it is broken.
+- [ ] Verify the 3.5.2 helper log and rollback path; do not report installation completion until the copied executable hash has been verified.
 
 ## Phase 6: Firebase, accounts and central analytics
 

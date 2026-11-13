@@ -1,5 +1,11 @@
 # ORI Changelog
 
+## 3.5.2 (13 November 2026)
+
+- Fix the Windows self-update handoff so a detached installer logs progress, waits for ORI to exit with a timeout, copies staged files using source-relative user-data exclusions, verifies the installed executable SHA-256, and restarts ORI.
+- Back up the previous program files and restore/restart the previous build if copying, verification or immediate startup fails.
+- Add regression tests for installer launch, expected paths, missing staged executables and helper-script safeguards.
+
 ## 3.5.1 (13 November 2026)
 
 - Read CPU package/Tctl/Tdie temperatures from LibreHardwareMonitor 0.9.6 through its loopback JSON endpoint, and share the same sensor reader between the top bar and hardware inventory.
