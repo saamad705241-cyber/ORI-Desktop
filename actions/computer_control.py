@@ -382,9 +382,21 @@ def _close_window(title: str, timeout: float = 5.0) -> str:
         return found
 
     try:
+        requested_folded = requested.casefold().strip()
+
+        def title_matches(caption: str) -> bool:
+            folded = str(caption or "").casefold().strip()
+            if folded == requested_folded:
+                return True
+            # Windows commonly formats document titles as "Document - App".
+            # Match the app-name suffix rather than a loose substring, so
+            # "Notepad" cannot accidentally close "Notepad++".
+            tail = re.split(r"\\s+[-–—]\\s+", folded)[-1]
+            return tail == requested_folded or tail.endswith(" " + requested_folded)
+
         matches = [
             window for window in visible_windows()
-            if requested.casefold() in window["title"].casefold()
+            if title_matches(window["title"])
         ]
         if not matches:
             return (
