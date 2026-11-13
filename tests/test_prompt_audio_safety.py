@@ -2,9 +2,11 @@ from pathlib import Path
 
 
 def test_core_prompt_protects_exact_text_from_misheard_speech():
-    prompt = (Path(__file__).resolve().parents[1] / "core" / "prompt.txt").read_text(
-        encoding="utf-8"
-    ).casefold()
+    prompt = " ".join(
+        (Path(__file__).resolve().parents[1] / "core" / "prompt.txt").read_text(
+            encoding="utf-8"
+        ).casefold().split()
+    )
 
     assert "automatic speech transcription can mishear" in prompt
     assert "never type, send, submit or publish a guessed transcript" in prompt
