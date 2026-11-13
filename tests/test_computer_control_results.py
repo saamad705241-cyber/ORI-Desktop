@@ -77,6 +77,18 @@ def test_close_window_does_not_close_ambiguous_matches(monkeypatch):
     assert len(windows) == 2
 
 
+def test_close_window_does_not_prefix_match_notepad_plus_plus(monkeypatch):
+    windows = {
+        1: {"pid": 77, "title": "notes.txt - Notepad++", "class": "Notepad++"}
+    }
+    _fake_win32(monkeypatch, windows)
+
+    result = computer_control._close_window("Notepad", timeout=0.1)
+
+    assert "no visible window matching" in result.lower()
+    assert windows[1]["title"].endswith("Notepad++")
+
+
 def test_close_window_reports_timeout_without_success(monkeypatch):
     windows = {
         1: {"pid": 77, "title": "Untitled - Notepad", "class": "Notepad"}
