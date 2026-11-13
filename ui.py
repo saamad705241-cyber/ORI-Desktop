@@ -3568,7 +3568,7 @@ class MainWindow(QMainWindow):
             rate, should_seek = audio_sync_action(drift)
             self._video_sound.setPlaybackRate(rate)
             now = time.monotonic()
-            if should_seek and now - self._video_sync_last_seek >= 4.0:
+            if should_seek and now - self._video_sync_last_seek >= 8.0:
                 self._video_sound.setPlaybackRate(1.0)
                 self._video_sound.setPosition(self._video_player.position())
                 self._video_sync_last_seek = now
