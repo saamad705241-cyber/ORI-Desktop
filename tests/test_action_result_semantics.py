@@ -27,3 +27,47 @@ def test_youtube_handler_empty_string_is_not_reported_as_done(monkeypatch):
 
     assert "unverified" in result.lower()
     assert "do not report" in result.lower()
+
+
+def test_file_processor_none_result_is_not_reported_as_success(monkeypatch, tmp_path):
+    from actions import file_processor
+
+    sample = tmp_path / "sample.txt"
+    sample.write_text("sample content", encoding="utf-8")
+    monkeypatch.setattr(file_processor, "_detect_type", lambda _path: "text")
+    monkeypatch.setattr(file_processor, "_process_text_doc", lambda *_args: None)
+
+    result = file_processor.file_processor(
+        {"file_path": str(sample), "action": "extract"}
+    )
+
+    assert "unverified" in result.lower()
+    assert "do not report" in result.lower()
+
+
+def test_computer_settings_dispatch_does_not_claim_completion(monkeypatch):
+    from actions import computer_settings
+
+    monkeypatch.setattr(computer_settings, "_PYAUTOGUI", True)
+    monkeypatch.setitem(computer_settings.ACTION_MAP, "show_desktop", lambda: None)
+
+    result = computer_settings.computer_settings({"action": "show_desktop"})
+
+    assert "unverified" in result.lower()
+    assert "do not report" in result.lower() or "not verified" in result.lower()
+
+
+def test_blind_messaging_does_not_claim_delivery(monkeypatch):
+    from types import SimpleNamespace
+    from actions import send_message
+
+    monkeypatch.setattr(send_message, "_open_app", lambda _app: True)
+    monkeypatch.setattr(send_message, "_search_in_app", lambda _receiver: None)
+    monkeypatch.setattr(send_message, "_paste_text", lambda _text: None)
+    monkeypatch.setattr(send_message.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(send_message, "pyautogui", SimpleNamespace(press=lambda _key: None))
+
+    result = send_message._desktop_send("Telegram", "Test User", "Hello")
+
+    assert "delivery were not verified" in result.lower()
+    assert "do not say the message was sent" in result.lower()
