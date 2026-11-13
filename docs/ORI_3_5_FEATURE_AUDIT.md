@@ -1,7 +1,7 @@
 # ORI 3.5.2 Feature Audit
 
 **Purpose:** a conservative engineering inventory before producing the public Windows installer.
-This is a source-and-test audit, not a claim that every capability has passed a live Windows test.
+This is a source-and-test audit, not a claim that every capability has passed a live Windows test. Settings layout, shared sensor resolution, single-action updater sequencing and initial close/open verification safeguards are now present in the feature branch; they remain unmerged and must pass the latest CI plus target-Windows smoke tests.
 
 ## Evidence labels
 
@@ -25,7 +25,7 @@ This is a source-and-test audit, not a claim that every capability has passed a 
 
 | Area | Source modules | Audit state | Release gate |
 |---|---|---|---|
-| App launch and computer input | `open_app.py`, `computer_control.py` | Partial; false-success issue is under repair | Open, focus, type, click, hotkey, graceful close and real postcondition |
+| App launch and computer input | `open_app.py`, `computer_control.py` | Initial reliability safeguards and regression tests added; full action audit and real Windows validation still required | Open-process/window check, graceful window close, unsaved-change dialog, focus, type, click, hotkey, timeout and postcondition |
 | Browser automation | `browser_control.py` | Implemented / manual verification required | Supported browser, login state, timeout and permission behavior |
 | File operations and document understanding | `file_controller.py`, `file_processor.py` | Implemented / manual verification required | Copy/move, safe delete, PDF/DOCX/XLSX and large files |
 | Desktop overview and screen analysis | `desktop_overview.py`, `screen_processor.py` | Implemented / manual verification required | Capture permission, monitor selection and privacy indicator |
@@ -42,10 +42,10 @@ This is a source-and-test audit, not a claim that every capability has passed a 
 | Area | Current evidence | Audit state | Release gate |
 |---|---|---|---|
 | CPU/RAM/GPU metrics | psutil/NVML paths and HUD | Implemented / hardware dependent | Compare displayed readings with Windows tools |
-| CPU temperature | Shared sensor resolver; LHM HTTP, legacy LHM WMI, Windows ACPI fallback and psutil | In repair; source disagreement identified between HUD and voice paths | Same provider/value in header, Settings and spoken system status; no false CPU label for generic ACPI zones |
-| Location and weather | Windows Geolocation API, OpenStreetMap/Open-Meteo path, mock tests | Partial; packaged build reported missing `winrt.windows.foundation` | Include WinRT Foundation in dependency and frozen package; run on target Windows |
+| CPU temperature | HUD and voice system-status now use the shared resolver; LHM HTTP, legacy LHM WMI, Windows ACPI fallback and psutil; provider metadata exposed | Source mismatch repaired in code and covered by tests; live hardware and permission behavior remain unverified | Same provider/value in header, Settings and spoken system status; distinguish ACPI thermal zone from CPU package; confirm no admin elevation is required for supported source |
+| Location and weather | Windows Geolocation API, OpenStreetMap/Open-Meteo path, WinRT Foundation dependency and PyInstaller collection added; CI import smoke test | Packaging fix added and CI-tested; Windows permission, location fix and weather remain unverified on the user's PC | Fresh packaged import, allow/deny permission, coordinates, timeout, privacy opt-out and weather response |
 | Phone Remote | QR pairing, local dashboard, controls and package-asset tests | Partial / manual end-to-end required | Pair, reconnect, authentication, screen view, file transfer and interruption |
-| Updater | GitHub release check, SHA-256, safe extraction, PowerShell replacement/rollback tests | Partial; GUI had three separate buttons; single-flow UI is being introduced | Real old-version → new-version update, cancel, rollback and restart |
+| Updater | GitHub release check, SHA-256, safe extraction, PowerShell replacement/rollback tests; one `CHECK & INSTALL UPDATE` button chains check → download → verify → confirmation → install | Combined UI flow and tests added; a real higher-version release/update cycle and successful restart/rollback remain unverified | Old-version → new-version install, no-update path, corrupt checksum, cancel, preservation of config/memory, rollback and restart |
 | Windows installer | Existing build produces a one-folder PyInstaller package and release ZIP | Not yet built as a public installer | Installer only after feature audit and Windows smoke tests |
 | Security and privacy | Gitleaks CI, secret/config handling, remote authentication and permission checks | Partial / manual security review required | No secret in package, no unintended public exposure, access indicators work |
 
@@ -55,11 +55,11 @@ The repository does not currently establish complete end-to-end implementations 
 
 ## Installer release gates
 
-1. Close the action false-success lifecycle issue with real postcondition checks and regression tests.
+1. Complete the action false-success lifecycle audit across every tool family; verify postconditions where possible and add timeout/permission/cancellation regression cases. The new close-window action and app-launch verification are only the first coverage layer.
 2. Complete the Windows feature matrix: voice/audio, app control, browser, files, media, memory, phone remote, system metrics, location/weather and updater.
-3. Fix and verify CPU-temperature parity and packaged WinRT location imports.
-4. Redesign Settings/About so no content or controls are clipped at supported window sizes.
-5. Replace the three-step updater UI with one sequential check → download → SHA-256 verify → confirm install/restart action.
+3. Confirm CPU-temperature parity on target hardware and validate packaged WinRT location on the user's Windows installation. CI import checks alone are not live location validation.
+4. Complete visual resize/DPI testing of the redesigned Settings categories and About text panel at supported window sizes.
+5. Validate the single sequential updater action with a real higher-version release: check → download → SHA-256 verify → confirm install/restart. The current v3.5.2 test build reported up to date because the latest public release was also v3.5.2.
 6. Run a clean Windows package smoke test and user-side acceptance tests. Record every pass/fail; do not treat source-only tests as live verification.
 7. Only then create the user-facing Windows installer. Future in-app updates should be delivered by ORI's updater, not by asking users to download ZIP files.
 
