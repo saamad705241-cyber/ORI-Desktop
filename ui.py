@@ -4450,11 +4450,31 @@ class MainWindow(QMainWindow):
             return self._settings_button(text, primary=primary)
 
         def page_layout():
+            # Keep category navigation fixed while allowing each settings page
+            # to scroll when its content exceeds the available window height.
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setStyleSheet(f"""
+                QScrollArea {{ background: transparent; border: 0; }}
+                QScrollBar:vertical {{ background: rgba(0, 8, 4, 160);
+                    width: 7px; margin: 2px; }}
+                QScrollBar::handle:vertical {{ background: {C.BORDER_B};
+                    min-height: 24px; border-radius: 3px; }}
+                QScrollBar::handle:vertical:hover {{ background: {C.PRI_DIM}; }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+            """)
             p = QWidget()
+            p.setStyleSheet("background: transparent;")
+            p.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             lay = QVBoxLayout(p)
             lay.setContentsMargins(0, 2, 0, 0)
             lay.setSpacing(10)
-            return p, lay
+            scroll.setWidget(p)
+            return scroll, lay
 
         # AI & PROFILE -------------------------------------------------------
         p0, l0 = page_layout()
@@ -4744,17 +4764,12 @@ class MainWindow(QMainWindow):
         about.addWidget(self._app_update_status_lbl)
         update_actions = QHBoxLayout()
         update_actions.setSpacing(8)
-        self._check_updates_btn = button("CHECK FOR UPDATES", True)
+        self._check_updates_btn = button("CHECK & UPDATE", True)
+        self._check_updates_btn.setToolTip(
+            "Check the latest release, download and verify it, then install and restart ORI."
+        )
         self._check_updates_btn.clicked.connect(self._check_app_updates)
         update_actions.addWidget(self._check_updates_btn)
-        self._download_update_btn = button("DOWNLOAD UPDATE")
-        self._download_update_btn.setEnabled(False)
-        self._download_update_btn.clicked.connect(self._download_app_update)
-        update_actions.addWidget(self._download_update_btn)
-        self._install_update_btn = button("INSTALL & RESTART")
-        self._install_update_btn.setEnabled(False)
-        self._install_update_btn.clicked.connect(self._install_app_update)
-        update_actions.addWidget(self._install_update_btn)
         update_actions.addStretch(1)
         about.addLayout(update_actions)
 
@@ -4824,22 +4839,9 @@ class MainWindow(QMainWindow):
             self._sensor_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
 
     def _recheck_temperature_sensor(self) -> None:
-        # Reset the cached WMI state. The background metric thread will re-probe
-        # the supported hardware providers on its next slow cycle.
-        for attr in ("_lhwmi_conn", "_wmi_conn"):
-            try:
-                setattr(_metrics, attr, None)
-            except Exception:
-                pass
-        for attr in ("_lhwmi_ok", "_wmi_ok"):
-            try:
-                setattr(_metrics, attr, None)
-            except Exception:
-                pass
-        try:
-            _metrics._slow_tick = 0
-        except Exception:
-            pass
+        # The shared sensor resolver does not cache hardware handles. Force the
+        # background metrics loop to query it on its next slow cycle.
+        _metrics._slow_tick = 0
         self._sensor_status_lbl.setText("Rechecking hardware temperature sensors…")
         QTimer.singleShot(2600, self._finish_temperature_sensor_recheck)
 
@@ -4871,93 +4873,146 @@ class MainWindow(QMainWindow):
         return label
 
     def _check_app_updates(self) -> None:
-        if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(False)
-            self._check_updates_btn.setText("CHECKING…")
+        """Run the complete check → download → verify → install update flow."""
+        button = getattr(self, "_check_updates_btn", None)
+        if button is not None:
+            button.setEnabled(False)
+            button.setText("CHECKING…")
         if hasattr(self, "_app_update_status_lbl"):
-            self._app_update_status_lbl.setText("Checking the configured official GitHub repository…")
+            self._app_update_status_lbl.setText(
+                "Checking the official ORI release. No files will be changed unless a verified update is available."
+            )
+
         def worker():
             try:
                 from core.app_updater import check_for_updates
                 result = check_for_updates()
             except Exception as exc:
-                result = {"ok": False, "message": f"Update check failed: {type(exc).__name__}: {exc}"}
+                result = {
+                    "ok": False,
+                    "message": f"Update check failed: {type(exc).__name__}: {exc}",
+                }
             self._app_update_check_sig.emit(result)
+
         threading.Thread(target=worker, name="ori-update-check", daemon=True).start()
 
     def _apply_app_update_check(self, result: object) -> None:
-        data = result if isinstance(result, dict) else {"ok": False, "message": "Invalid update response."}
+        data = result if isinstance(result, dict) else {
+            "ok": False, "message": "Invalid update response."
+        }
+        if not data.get("ok"):
+            self._finish_update_flow(
+                str(data.get("message") or "Could not check for updates."), success=False
+            )
+            return
+        if not data.get("update_available"):
+            self._finish_update_flow(
+                str(data.get("message") or "ORI is up to date."), success=True
+            )
+            return
+
+        if not isinstance(data.get("asset"), dict) or not isinstance(data.get("checksum_asset"), dict):
+            self._finish_update_flow(
+                "A newer release exists, but its Windows package or SHA-256 checksum is missing. "
+                "No update was downloaded or installed.",
+                success=False,
+            )
+            return
+
+        if platform.system() != "Windows" or not getattr(sys, "frozen", False):
+            self._finish_update_flow(
+                f"ORI {data.get('latest_version')} is available, but automatic installation "
+                "requires the packaged Windows application. This source build was left unchanged.",
+                success=False,
+            )
+            return
+
         self._latest_update_info = data
         if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(True)
-            self._check_updates_btn.setText("CHECK FOR UPDATES")
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(bool(data.get("ok") and data.get("update_available") and data.get("asset") and data.get("checksum_asset")))
+            self._check_updates_btn.setText("DOWNLOADING…")
         if hasattr(self, "_app_update_status_lbl"):
-            if data.get("ok") and data.get("update_available"):
-                self._app_update_status_lbl.setText(
-                    f"UPDATE AVAILABLE · ORI {data.get('latest_version')} · SHA-256 verification required before install."
-                )
-                self._app_update_status_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
-            else:
-                self._app_update_status_lbl.setText(str(data.get("message") or "No update information."))
-                self._app_update_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM if data.get('ok') else C.ACC}; background: transparent;")
+            self._app_update_status_lbl.setText(
+                f"ORI {data.get('latest_version')} is available. Downloading the release and "
+                "verifying its SHA-256 checksum…"
+            )
+        self._download_app_update(data)
 
-    def _download_app_update(self) -> None:
-        info = getattr(self, "_latest_update_info", None)
-        if not isinstance(info, dict) or not info.get("update_available"):
-            return
-        self._download_update_btn.setEnabled(False)
-        self._download_update_btn.setText("DOWNLOADING…")
-        if hasattr(self, "_app_update_status_lbl"):
-            self._app_update_status_lbl.setText("Downloading release and verifying its SHA-256 checksum…")
+    def _download_app_update(self, info: dict) -> None:
+        """Download and stage the already-checked release off the UI thread."""
+        if hasattr(self, "_check_updates_btn"):
+            self._check_updates_btn.setEnabled(False)
+            self._check_updates_btn.setText("DOWNLOADING…")
+
         def worker():
             try:
                 from core.app_updater import download_latest_update
                 result = download_latest_update(info)
             except Exception as exc:
-                result = {"ok": False, "message": f"Update download failed: {type(exc).__name__}: {exc}"}
+                result = {
+                    "ok": False,
+                    "message": f"Update download failed: {type(exc).__name__}: {exc}",
+                }
             self._app_update_download_sig.emit(result)
+
         threading.Thread(target=worker, name="ori-update-download", daemon=True).start()
 
     def _apply_app_update_download(self, result: object) -> None:
-        data = result if isinstance(result, dict) else {"ok": False, "message": "Invalid download response."}
-        self._staged_update = data if data.get("ok") else None
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(False)
-            self._download_update_btn.setText("DOWNLOAD UPDATE")
-        frozen = bool(getattr(sys, "frozen", False))
-        if hasattr(self, "_install_update_btn"):
-            self._install_update_btn.setEnabled(bool(data.get("ok") and frozen))
-        if hasattr(self, "_app_update_status_lbl"):
-            message = str(data.get("message") or "Update download finished.")
-            if data.get("ok") and not frozen:
-                message += " Source/development build detected: close ORI, then replace the source folder with the verified release package or update through Git."
-            self._app_update_status_lbl.setText(message)
-            self._app_update_status_lbl.setStyleSheet(f"color: {C.GREEN if data.get('ok') else C.ACC}; background: transparent;")
+        data = result if isinstance(result, dict) else {
+            "ok": False, "message": "Invalid update download response."
+        }
+        if not data.get("ok") or not data.get("staged_dir"):
+            self._finish_update_flow(
+                str(data.get("message") or "Update download or verification failed."),
+                success=False,
+            )
+            return
 
-    def _install_app_update(self) -> None:
-        data = getattr(self, "_staged_update", None)
-        if not isinstance(data, dict) or not data.get("staged_dir"):
+        if platform.system() != "Windows" or not getattr(sys, "frozen", False):
+            self._finish_update_flow(
+                "The update package was verified, but this source build cannot replace itself. "
+                "The running application was left unchanged.",
+                success=False,
+            )
             return
-        answer = QMessageBox.question(
-            self, "Install ORI update?",
-            "ORI will close, replace its program files, preserve your configuration and memory, then restart. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
+
+        if hasattr(self, "_check_updates_btn"):
+            self._check_updates_btn.setText("INSTALLING…")
+        if hasattr(self, "_app_update_status_lbl"):
+            self._app_update_status_lbl.setText(
+                f"ORI {data.get('version') or 'update'} downloaded and SHA-256 verified. "
+                "Starting the Windows installer and preparing to restart…"
+            )
         try:
             from core.app_updater import schedule_windows_update
-            result = schedule_windows_update(str(data["staged_dir"]))
-            if not result.get("ok"):
-                self._app_update_status_lbl.setText(str(result.get("message")))
+            scheduled = schedule_windows_update(str(data["staged_dir"]))
+            if not scheduled.get("ok"):
+                self._finish_update_flow(
+                    str(scheduled.get("message") or "Could not start the update installer."),
+                    success=False,
+                )
                 return
-            self._app_update_status_lbl.setText(str(result.get("message")))
+            if hasattr(self, "_app_update_status_lbl"):
+                self._app_update_status_lbl.setText(str(scheduled.get("message") or (
+                    "The verified update installer started. ORI will close and restart."
+                )))
             QApplication.quit()
         except Exception as exc:
-            self._app_update_status_lbl.setText(f"Could not schedule update: {type(exc).__name__}: {exc}")
+            self._finish_update_flow(
+                f"Could not start the update installer: {type(exc).__name__}: {exc}",
+                success=False,
+            )
+
+    def _finish_update_flow(self, message: str, *, success: bool) -> None:
+        button = getattr(self, "_check_updates_btn", None)
+        if button is not None:
+            button.setEnabled(True)
+            button.setText("CHECK & UPDATE")
+        label = getattr(self, "_app_update_status_lbl", None)
+        if label is not None:
+            label.setText(str(message or "Update flow finished."))
+            label.setStyleSheet(
+                f"color: {C.GREEN if success else C.ACC}; background: transparent;"
+            )
 
     def _refresh_settings_status(self):
         if not hasattr(self, "_gemini_status"):
