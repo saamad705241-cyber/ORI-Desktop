@@ -26,6 +26,13 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pytest ruff
           python -c "from winrt.windows.devices.geolocation import Geolocator; assert callable(Geolocator.request_access_async)"
+      - name: Validate Windows update helper syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "core/apply_update.ps1"), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | Format-List | Out-String | Write-Error; exit 1 }
       - name: Compile Python sources
         run: python scripts/compile_sources.py
       - name: Run automated tests
@@ -67,6 +74,7 @@ jobs:
         run: |
           $required = @(
             "dist/ORI/ORI.exe",
+            "dist/ORI/core/apply_update.ps1",
             "dist/ORI/dashboard/static/app.html",
             "dist/ORI/dashboard/static/login.html",
             "dist/ORI/dashboard/static/crypto-js.js",
@@ -78,7 +86,7 @@ jobs:
           foreach ($path in $required) {
             if (!(Test-Path $path)) { throw "Windows package is missing required file: $path" }
           }
-          Write-Host "Windows package, Phone Remote, location runtime and microphone/voice assets verified."
+          Write-Host "Windows package, self-update helper, Phone Remote, location runtime and microphone/voice assets verified."
       - uses: actions/upload-artifact@v4
         with:
           name: ORI-Windows-Package-${{ github.sha }}

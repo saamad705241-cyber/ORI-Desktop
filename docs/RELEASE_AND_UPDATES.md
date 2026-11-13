@@ -43,3 +43,8 @@ For an already installed packaged ORI, the user does not need to download the re
 - Keep user API keys and local memory out of releases.
 - The release ZIP contains the full app folder; the final single-file installer and uninstaller remain a separate last phase.
 - Verify third-party license and redistribution terms before public binary distribution.
+
+
+## Windows self-update installation helper
+
+The packaged update installer is copied to `%LOCALAPPDATA%/ORI/updates/install-helper` before ORI exits. It writes a transcript log there, waits up to 120 seconds for the current process to close, backs up the existing program files, copies the staged package while excluding user-data folders and `api_keys.json`, compares the staged and installed `ORI.exe` SHA-256 values, and starts the new executable. If copying, verification or immediate startup fails, it attempts to restore and restart the previous build. The UI reports the log path; a completed download or a started helper is not itself reported as a completed installation.

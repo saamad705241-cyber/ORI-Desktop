@@ -134,3 +134,77 @@ def test_download_update_rejects_checksum_mismatch(monkeypatch, tmp_path):
     result = updater.download_latest_update(info)
     assert result["ok"] is False
     assert "SHA-256" in result["message"]
+
+
+def test_schedule_windows_update_launches_logged_verified_powershell_helper(
+    monkeypatch, tmp_path
+):
+    install_dir = tmp_path / "installed"
+    staged_dir = tmp_path / "staged"
+    install_dir.mkdir()
+    staged_dir.mkdir()
+    installed_exe = install_dir / "ORI.exe"
+    staged_exe = staged_dir / "ORI.exe"
+    installed_exe.write_bytes(b"old-installed-build")
+    staged_exe.write_bytes(b"new-staged-build")
+
+    monkeypatch.setattr(updater, "platform_name", lambda: "Windows")
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updater.sys, "executable", str(installed_exe), raising=False)
+    monkeypatch.setattr(updater.sys, "_MEIPASS", str(tmp_path / "bundle"), raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+
+    bundled_core = tmp_path / "bundle" / "core"
+    bundled_core.mkdir(parents=True)
+    helper_source = Path(updater.__file__).resolve().with_name("apply_update.ps1")
+    (bundled_core / "apply_update.ps1").write_text(
+        helper_source.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(updater.subprocess, "Popen", fake_popen)
+
+    result = updater.schedule_windows_update(str(staged_dir))
+
+    assert result["ok"] is True
+    assert "verify the installed executable" in result["message"]
+    command = captured["command"]
+    assert command[0].lower() == "powershell.exe"
+    assert "-File" in command
+    helper_path = Path(command[command.index("-File") + 1])
+    assert helper_path.is_file()
+    script = helper_path.read_text(encoding="utf-8")
+    assert "Wait-Process -Id $AppPid -Timeout 120" in script
+    assert "Get-FileHash -LiteralPath $sourceExe -Algorithm SHA256" in script
+    assert "Invoke-VerifiedRobocopy -From $SourceDir -To $InstallDir" in script
+    assert "ROLLBACK SUCCESS" in script
+    assert str(staged_dir) in command
+    assert str(install_dir) in command
+    assert result["log_file"].endswith(".log")
+    assert captured["kwargs"]["cwd"] == str(install_dir)
+
+
+def test_schedule_windows_update_rejects_staged_folder_without_ori_exe(
+    monkeypatch, tmp_path
+):
+    install_dir = tmp_path / "installed"
+    install_dir.mkdir()
+    (install_dir / "ORI.exe").write_bytes(b"old")
+    staged_dir = tmp_path / "staged"
+    staged_dir.mkdir()
+
+    monkeypatch.setattr(updater, "platform_name", lambda: "Windows")
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updater.sys, "executable", str(install_dir / "ORI.exe"), raising=False)
+
+    result = updater.schedule_windows_update(str(staged_dir))
+
+    assert result["ok"] is False
+    assert "staged update does not contain ORI.exe" in result["message"]
