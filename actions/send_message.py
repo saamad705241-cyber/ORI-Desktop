@@ -143,52 +143,45 @@ def _desktop_send(app_name: str, receiver: str, message: str) -> str:
     )
 
 def _send_whatsapp(receiver: str, message: str) -> str:
-    """WhatsApp goes through the verified driver when there is one.
+    """Send only through the verified WhatsApp transport.
 
-    _desktop_send below is a sequence of keystrokes with sleeps between them:
-    it presses Win, types the app name, presses Ctrl+F, types the contact,
-    presses Enter twice and reports success — without ever reading back which
-    window received any of that. When the machine is a second slower than the
-    sleeps assume, the whole sequence lands somewhere else and the user is
-    still told the message was sent.
-
-    plugins/_whatsapp_core.py already drives WhatsApp properly for the calling
-    plugins: it finds the real window, opens the conversation, checks the
-    conversation is the right person's, types, and confirms the box emptied
-    before it says "sent". Using it here costs nothing and removes the one
-    failure that matters — a message reported as delivered that never left.
-
-    The blind path stays as the fallback for a machine where the driver cannot
-    run at all (the plugin file removed, a missing dependency, no WhatsApp).
-    But once the driver HAS run, its answer stands: falling back after it
-    refused to send is how a message ends up typed into the wrong
-    conversation, which is worse than not sending it.
+    ORI deliberately refuses the old blind keyboard sequence. Without a
+    transport that can identify the target conversation and confirm the send,
+    it is safer to report that messaging is unavailable than to claim that a
+    message was delivered or risk typing it into the wrong chat.
     """
     try:
         from plugins import _whatsapp_core as wa
-    except Exception as e:
+    except Exception as exc:
         return (
-            f"Verified WhatsApp delivery is unavailable ({type(e).__name__}). "
+            f"Verified WhatsApp delivery is unavailable ({type(exc).__name__}). "
             f"No message was sent to {receiver}."
         )
 
     try:
-        transport, why = wa.get()
-    except Exception as e:
+        transport, reason = wa.get()
+    except Exception as exc:
         return (
-            f"The verified WhatsApp driver failed to start ({type(e).__name__}: {e}). "
+            f"The verified WhatsApp driver failed to start ({type(exc).__name__}: {exc}). "
             f"No message was sent to {receiver}."
         )
 
     if transport is None:
-        return f"WhatsApp could not be verified ({why}). No message was sent to {receiver}."
+        return f"WhatsApp could not be verified ({reason}). No message was sent to {receiver}."
 
-    sent, failure = transport.send_message_to(receiver, message)
+    try:
+        sent, failure = transport.send_message_to(receiver, message)
+    except Exception as exc:
+        return (
+            f"WhatsApp delivery verification failed ({type(exc).__name__}: {exc}). "
+            f"No message was sent to {receiver}."
+        )
     if sent:
-        return f"Message sent to {receiver} via WhatsApp."
-    return (f"The message to {receiver} was NOT sent on WhatsApp: {failure}. "
-            f"Tell the user plainly that it was not sent, and why - do not "
-            f"say it was sent.")
+        return f"Message sent to {receiver} via verified WhatsApp transport."
+    return (
+        f"The message to {receiver} was NOT sent on WhatsApp: {failure}. "
+        "Tell the user plainly that it was not sent; do not say it was sent."
+    )
 
 def _send_telegram(receiver: str, message: str) -> str:
     return _desktop_send("Telegram", receiver, message)
