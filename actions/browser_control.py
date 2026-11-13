@@ -395,7 +395,7 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                 cmd = ["open", "-a", app] + ([url] if url else [])
                 try:
                     subprocess.run(cmd, check=True, timeout=10)
-                    return f"Opened in {name}: {url}" if url else f"Opened {name}."
+                    return (f"Browser launch request accepted for {name}; the visible window and page load were not verified." if url else f"Browser launch request accepted for {name}; the window was not verified.")
                 except Exception as e:
                     print(f"[Browser] 'open -a {app}' failed ({e}), trying binary…")
 
@@ -412,7 +412,7 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                     [exe, url] if url else [exe],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
-                return f"Opened in {name}: {url}" if url else f"Opened {name}."
+                return (f"Browser launch request accepted for {name}; the visible window and page load were not verified." if url else f"Browser launch request accepted for {name}; the window was not verified.")
             except Exception as e:
                 print(f"[Browser] Native launch failed for {name}: {e}")
         print(f"[Browser] '{name}' not found — falling back to default browser.")
@@ -431,11 +431,11 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                 ["xdg-open", url],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-        return f"Opened in your default browser: {url}"
+        return f"Default browser launch request accepted for {url}; page load was not verified."
     except Exception:
         try:
             if webbrowser.open(url):
-                return f"Opened in your default browser: {url}"
+                return f"Default browser launch request accepted for {url}; page load was not verified."
         except Exception:
             pass
         return f"Could not open a browser for: {url}"
