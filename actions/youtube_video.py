@@ -435,8 +435,15 @@ def youtube_video(
 
     try:
         if action == "play":
-            return handler(params, player) or "Done."
-        return handler(params, player, speak) or "Done."
+            result = handler(params, player)
+        else:
+            result = handler(params, player, speak)
+        if result is None or (isinstance(result, str) and not result.strip()):
+            return (
+                f"YouTube action '{action}' returned no confirmation. "
+                "The outcome is unverified; do not report success."
+            )
+        return result if isinstance(result, str) else str(result)
     except Exception as e:
         print(f"[YouTube] ❌ Error in {action}: {e}")
         return f"YouTube {action} failed, sir: {e}"
