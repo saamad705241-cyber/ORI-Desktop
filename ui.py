@@ -49,6 +49,9 @@ except Exception as _e:            # noqa: BLE001 - reported, never fatal
     HAVE_VIDEO = False
     print(f"[Video] playback unavailable ({_e}) — the HUD will not show video.")
 
+from core.app_paths import get_app_data_dir
+from core.media_sync import audio_sync_action
+
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QMainWindow, QPushButton, QScrollArea, QSizePolicy, QSplitter,
@@ -64,8 +67,8 @@ def _base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 BASE_DIR   = _base_dir()
-CONFIG_DIR = BASE_DIR / "config"
-API_FILE   = CONFIG_DIR / "api_keys.json"
+CONFIG_DIR = BASE_DIR / "config"  # bundled, read-only UI assets
+API_FILE   = get_app_data_dir() / "config" / "api_keys.json"
 
 
 def _read_full_config() -> dict:
@@ -3084,6 +3087,7 @@ class MainWindow(QMainWindow):
 
         # Video surface shares the same central stack as the waveform and camera.
         self._video_split = False        # is the sound a separate stream?
+        self._video_sync_last_seek = 0.0
         self._video_auto_muted = False   # did ORI close the mic, or the user?
         # These plain flags are read from action worker threads. _video_on means
         # the video panel is open; _video_playback_confirmed changes only when
@@ -3442,6 +3446,7 @@ class MainWindow(QMainWindow):
 
         self._video_title.setText(f"▶  {(title or 'VIDEO')[:44].upper()}")
         self._video_split = bool(audio_source)
+        self._video_sync_last_seek = 0.0
         self._set_video_muted(bool(muted))
 
         url = (QUrl.fromLocalFile(source) if Path(source).exists()
@@ -3490,6 +3495,12 @@ class MainWindow(QMainWindow):
 
     def _on_video_close(self) -> None:
         self._reset_video_players()
+        if self._video_sound:
+            try:
+                self._video_sound.setPlaybackRate(1.0)
+            except Exception:
+                pass
+        self._video_sync_last_seek = 0.0
         self._video_split = False
         self._video_on = False
         self._video_playback_confirmed = False
@@ -3537,22 +3548,30 @@ class MainWindow(QMainWindow):
             self._set_muted(False, "The video is quiet again.")
 
     def _sync_video_sound(self) -> None:
-        """Keep the separate soundtrack in step with the picture.
+        """Correct split-stream drift without seeking the soundtrack every second.
 
-        Two players started at the same moment do not stay together: they buffer
-        independently, and measured on a real stream they were about half a
-        second apart after nine seconds. So the sound is nudged back to the
-        picture whenever it drifts far enough to hear — and only then, because
-        correcting a smaller gap is itself audible.
+        Frequent setPosition() calls restart decoder buffers and can themselves
+        sound like skips. Small drift is corrected with a barely audible rate
+        adjustment; a large correction is rate-limited to one seek every four
+        seconds so a buffering stream cannot trigger repeated cuts.
         """
         if not (self._video_split and self._video_sound and self._video_player):
             return
         try:
-            if self._video_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+            playing = QMediaPlayer.PlaybackState.PlayingState
+            if (
+                self._video_player.playbackState() != playing
+                or self._video_sound.playbackState() != playing
+            ):
                 return
             drift = self._video_sound.position() - self._video_player.position()
-            if abs(drift) > 300:
+            rate, should_seek = audio_sync_action(drift)
+            self._video_sound.setPlaybackRate(rate)
+            now = time.monotonic()
+            if should_seek and now - self._video_sync_last_seek >= 4.0:
+                self._video_sound.setPlaybackRate(1.0)
                 self._video_sound.setPosition(self._video_player.position())
+                self._video_sync_last_seek = now
         except Exception:
             pass
 
