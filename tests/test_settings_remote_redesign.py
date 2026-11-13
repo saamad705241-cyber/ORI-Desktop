@@ -51,6 +51,17 @@ class SettingsRemoteRedesignTests(unittest.TestCase):
         self.assertNotIn("_download_update_btn", source)
         self.assertNotIn("_install_update_btn", source)
 
+    def test_voice_system_and_about_settings_use_balanced_columns(self):
+        source = (ROOT / "ui.py").read_text(encoding="utf-8")
+        start = source.index("    def _build_settings_page(self) -> QWidget:")
+        end = source.index("    def _select_settings_category(", start)
+        section = source[start:end]
+        self.assertIn("voice_columns = QHBoxLayout()", section)
+        self.assertIn("system_columns = QHBoxLayout()", section)
+        self.assertIn("about_columns = QHBoxLayout()", section)
+        self.assertIn("about_text = QTextEdit()", section)
+        self.assertIn("about_text.setReadOnly(True)", section)
+
     def test_update_flow_chains_check_download_and_install(self):
         source = (ROOT / "ui.py").read_text(encoding="utf-8")
         check_handler = source[source.index("    def _apply_app_update_check"):source.index("    def _download_app_update")]
