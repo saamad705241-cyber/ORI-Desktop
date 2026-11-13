@@ -42,7 +42,8 @@ class VideoPlayerTests(unittest.TestCase):
                 player=player,
             )
 
-            self.assertEqual(out, "Playing song.mp4 on the display, muted.")
+            self.assertIn("Video load was requested", out)
+            self.assertIn("Playback has not yet been confirmed", out)
             self.assertEqual(player.stopped, 1)
             self.assertEqual(len(player.shown), 1)
             self.assertEqual(player.shown[0]["source"], str(clip))
@@ -56,7 +57,8 @@ class VideoPlayerTests(unittest.TestCase):
             player=player,
         )
 
-        self.assertEqual(out, "Playing that on the display, muted.")
+        self.assertIn("Video load was requested", out)
+        self.assertIn("Playback has not yet been confirmed", out)
         self.assertEqual(player.stopped, 1)
         self.assertEqual(len(player.shown), 1)
         self.assertEqual(player.shown[0]["source"], "https://example.com/test.mp4")
