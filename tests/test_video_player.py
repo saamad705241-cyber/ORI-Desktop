@@ -42,7 +42,7 @@ class VideoPlayerTests(unittest.TestCase):
                 player=player,
             )
 
-            self.assertEqual(out, "Playing song.mp4 on the display, muted.")
+            self.assertEqual(out, "Playing song.mp4 on the display, muted. Qt playback was confirmed.")
             self.assertEqual(player.stopped, 1)
             self.assertEqual(len(player.shown), 1)
             self.assertEqual(player.shown[0]["source"], str(clip))
@@ -56,7 +56,7 @@ class VideoPlayerTests(unittest.TestCase):
             player=player,
         )
 
-        self.assertEqual(out, "Playing that on the display, muted.")
+        self.assertEqual(out, "Playing that on the display, muted. Qt playback was confirmed.")
         self.assertEqual(player.stopped, 1)
         self.assertEqual(len(player.shown), 1)
         self.assertEqual(player.shown[0]["source"], "https://example.com/test.mp4")

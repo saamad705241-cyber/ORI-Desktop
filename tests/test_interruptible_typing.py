@@ -74,5 +74,6 @@ def test_new_computer_action_clears_previous_cancel_event(monkeypatch):
     cc._ACTION_CANCEL.set()
     cc.clear_cancel_request()  # the dispatcher clears it before starting a new call
     result = cc.computer_control({"action": "type", "text": "Hello"})
-    assert "Typed" in result
+    assert "Keyboard input sent" in result
+    assert "not read back" in result
     assert not cc._ACTION_CANCEL.is_set()

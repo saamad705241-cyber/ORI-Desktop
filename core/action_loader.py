@@ -101,7 +101,13 @@ class ActionRegistry:
         if rec is None or not rec.valid:
             return f"Action '{name}' is not available."
         try:
-            return _call_handler(rec.handler, parameters, ctx or {}) or "Done."
+            result = _call_handler(rec.handler, parameters, ctx or {})
+            if result is None or (isinstance(result, str) and not result.strip()):
+                return (
+                    f"Action '{name}' returned no confirmation. "
+                    "The outcome is unverified; do not report this action as successful."
+                )
+            return result if isinstance(result, str) else str(result)
         except Exception as e:
             self._logger(f"Action '{name}' crashed during run(): {e}")
             traceback.print_exc()

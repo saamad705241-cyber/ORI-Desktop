@@ -11,10 +11,10 @@ normal users cannot edit it through Settings.
 # ---------------------------------------------------------------------------
 
 APP_NAME = "ORI"
-APP_VERSION = "3.5.2"
+APP_VERSION = "3.5.3"
 APP_RELEASE_LABEL = f"ORI {APP_VERSION}"
 APP_MODEL_LABEL = f"ORI Core {'.'.join(APP_VERSION.split('.')[:2])}"  # Product/runtime identity, not a foundation-model claim.
-BUILD_DATE = "13 November 2026"
+BUILD_DATE = "14 November 2026"
 RELEASE_DATE = BUILD_DATE
 PLANNED_FINAL_RELEASE = "November 2026"
 RELEASE_STATUS = "Final integration candidate; Windows, microphone and live-service verification required before public release"
@@ -81,11 +81,16 @@ Available feature areas in this source
 - Voice barge-in using WebRTC voice activity detection plus adaptive speaker-echo rejection; this is not biometric speaker identity verification.
 - Interruptible chunked text entry so a user interrupt can stop large typing operations quickly.
 - Read-only desktop overview and bounded Windows Update diagnostics.
-- CPU/RAM and optional temperature monitoring; the display can show values, mini graphs or both.
+- Live CPU/RAM, network throughput, GPU utilisation and system-volume usage in the HUD, plus detected device model; temperature remains optional.
+
+Windows update capability in this candidate
+- The Settings CHECK & UPDATE flow checks the GitHub release, downloads the versioned Windows package, verifies its SHA-256 checksum, stages the update and schedules installation/restart.
+- The release workflow creates a versioned GitHub release and matching checksum after the candidate is merged to the main branch. This candidate is not a published release yet.
+- The full update and restart must be tested from an installed previous version before the updater is considered end-to-end verified.
+- The final single-file installer remains a later phase.
 
 Coming soon / not enabled in this build
 - Account sign-in and cloud profile synchronization.
-- GitHub release checks, SHA-256 verification, staged Windows updates and automatic versioned GitHub releases are implemented. The final single-file installer remains a later phase.
 - Additional remote features are labelled as coming soon until their end-to-end tests pass.
 """
 
@@ -108,11 +113,12 @@ Settings are grouped into small, collapsed sections and contain only user-facing
 - Audio Devices: microphone and speaker selection.
 - Interface: choose the signal accent while keeping the terminal design.
 - Voice and Automation: supported wake word, push-to-talk, briefing and Windows startup.
-- System Display: choose percentages, compact graphs, or both for CPU/RAM and available
-  temperature. Temperature is displayed in degrees Celsius; unavailable sensors show N/A.
+- System Display: CPU/RAM, live network throughput, GPU utilisation and system-volume usage
+  appear in the HUD. The machine manufacturer/model and laptop/desktop class are detected when
+  the operating system exposes them. Temperature remains optional and unavailable sensors show N/A.
 - System & Weather: weather is optional and only enabled on explicit user request.
 - Phone Remote: QR pairing and the local phone dashboard. Pair trusted devices on the same LAN.
-- About & Updates: current release state and features that are still coming soon.
+- About & Updates: current version, candidate/release state, and the verified Windows update flow.
 - Terms: collapsed until opened.
 No Firebase Web API, sign-in management, browser settings, privacy dashboard or diagnostic-copy
 controls are presented in ordinary user Settings.

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -49,6 +50,33 @@ def _begin_open() -> int:
 def _still_wanted(token: int) -> bool:
     with _open_lock:
         return token == _open_seq
+
+
+def _video_is_open(player) -> bool:
+    checker = getattr(player, "video_is_open", None)
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    try:
+        return bool(player.video_is_playing())
+    except Exception:
+        return False
+
+
+def _wait_for_video_playback(player, timeout: float = 4.0) -> bool:
+    """Wait briefly for Qt to report PlayingState, not just an emitted open request."""
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        try:
+            if player.video_is_playing():
+                return True
+        except Exception:
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
 
 
 def _is_url(text: str) -> bool:
@@ -180,7 +208,7 @@ def video_player(parameters: dict = None, response=None, player=None,
     if action in ("stop", "close", "hide"):
         # Cancel an open that has not finished yet, so a video the user has
         # already changed their mind about never reaches the screen.
-        was_opening = not player.video_is_playing()
+        was_opening = not _video_is_open(player)
         _begin_open()
         player.stop_video()
         if was_opening:
@@ -189,8 +217,8 @@ def video_player(parameters: dict = None, response=None, player=None,
 
     # ---- sound ------------------------------------------------------------
     if action in ("mute", "unmute", "sound_on", "sound_off"):
-        if not player.video_is_playing():
-            return "Nothing is playing."
+        if not _video_is_open(player):
+            return "No video is open."
         muted = action in ("mute", "sound_off")
         player.set_video_muted(muted)
         return "Muted the video." if muted else "Turned the video's sound on."
@@ -204,20 +232,36 @@ def video_player(parameters: dict = None, response=None, player=None,
     # and leave Qt media objects fighting over stale state.
     if player is not None and hasattr(player, "video_is_playing"):
         try:
-            if player.video_is_playing():
+            if _video_is_open(player):
                 player.stop_video()
         except Exception:
             pass
 
     local = _local_path(source)
     if local:
-        player.show_video(local, Path(local).name, muted=True)
-        return f"Playing {Path(local).name} on the display, muted."
+        try:
+            player.show_video(local, Path(local).name, muted=True)
+        except Exception as exc:
+            return f"Could not request local video playback: {type(exc).__name__}: {exc}"
+        if _wait_for_video_playback(player, timeout=4.0):
+            return f"Playing {Path(local).name} on the display, muted. Qt playback was confirmed."
+        return (
+            f"Local video playback was requested for {Path(local).name}, but Qt did not "
+            "confirm that playback started. The video may still be loading or may have failed."
+        )
 
     # A direct media URL can go straight to the player; a YouTube page cannot.
     if _is_url(source) and not _YT.search(source):
-        player.show_video(source, source.rsplit("/", 1)[-1][:44], muted=True)
-        return "Playing that on the display, muted."
+        try:
+            player.show_video(source, source.rsplit("/", 1)[-1][:44], muted=True)
+        except Exception as exc:
+            return f"Could not request video playback: {type(exc).__name__}: {exc}"
+        if _wait_for_video_playback(player, timeout=5.0):
+            return "Playing that on the display, muted. Qt playback was confirmed."
+        return (
+            "The video open request was sent, but Qt did not confirm playback yet. "
+            "The stream may still be buffering or may not be playable."
+        )
 
     # ANSWER FIRST, OPEN SECOND.
     #
@@ -254,7 +298,9 @@ def _play_youtube(player, source: str, token: int) -> None:
         try:
             player.show_video(url, title or source, muted=True,
                               audio_source=audio_url)
-            return
+            if _wait_for_video_playback(player, timeout=12.0):
+                return
+            err = "Qt did not confirm that video playback started within 12 seconds"
         except Exception as e:                              # noqa: BLE001
             err = str(e)
 
@@ -264,10 +310,13 @@ def _play_youtube(player, source: str, token: int) -> None:
     page = source if _YT.search(source) else _search_page(source)
     opened = ""
     try:
-        webbrowser.open(page)
-        opened = " and it has been opened in the browser instead"
-    except Exception:
-        pass
+        browser_opened = webbrowser.open(page)
+        if browser_opened:
+            opened = " and the browser accepted the fallback page request"
+        else:
+            opened = "; the browser also did not confirm that it opened"
+    except Exception as exc:
+        opened = f"; browser fallback failed ({type(exc).__name__}: {exc})"
     _say(player, "Tell the user, in one short sentence in their own language: "
                  f"'{source}' could not be played on the display "
                  f"({err}){opened}.")

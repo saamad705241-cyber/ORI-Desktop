@@ -96,7 +96,12 @@ def _execute_generated_code(code: str, player=None) -> str:
 
     try:
         exec(compile(code, "<jarvis_desktop>", "exec"), sandbox)
-        return "\n".join(output_lines) if output_lines else "Done."
+        if output_lines:
+            return "\n".join(output_lines)
+        return (
+            "Desktop code ran without a confirmation message. "
+            "The outcome is unverified; do not report the requested task as successful."
+        )
     except Exception as e:
         print(f"[Desktop] Exec error: {e}\nCode:\n{code[:300]}")
         return f"Execution error: {e}"
@@ -172,33 +177,35 @@ def set_wallpaper(image_path: str) -> str:
                     path = bmp_path
                 except ImportError:
                     pass 
-            ctypes.windll.user32.SystemParametersInfoW(20, 0, str(path), 3)
-            return f"Wallpaper set: {path.name}"
+            applied = bool(ctypes.windll.user32.SystemParametersInfoW(20, 0, str(path), 3))
+            if not applied:
+                raise OSError("Windows rejected the wallpaper change.")
+            return f"Wallpaper set: {path.name}. Verified: Windows accepted the wallpaper change."
 
         elif _OS == "Darwin":
             script = (
                 f'tell application "System Events" to tell every desktop to '
                 f'set picture to POSIX file "{path}"'
             )
-            subprocess.run(["osascript", "-e", script], capture_output=True)
-            return f"Wallpaper set: {path.name}"
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "macOS rejected the wallpaper change.").strip()
+                raise RuntimeError(detail[:400])
+            return f"Wallpaper set: {path.name}. Verified: macOS accepted the change."
 
         else:
             desktop_env = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
             uri = f"file://{path}"
 
             if "gnome" in desktop_env or "unity" in desktop_env:
-                subprocess.run([
-                    "gsettings", "set", "org.gnome.desktop.background",
-                    "picture-uri", uri
-                ], capture_output=True)
-                subprocess.run([
-                    "gsettings", "set", "org.gnome.desktop.background",
-                    "picture-uri-dark", uri
-                ], capture_output=True)
-
+                commands = [
+                    ["gsettings", "set", "org.gnome.desktop.background", "picture-uri", uri],
+                    ["gsettings", "set", "org.gnome.desktop.background", "picture-uri-dark", uri],
+                ]
             elif "kde" in desktop_env:
-                # KDE Plasma
                 script = f"""
 var allDesktops = desktops();
 for (var i = 0; i < allDesktops.length; i++) {{
@@ -208,31 +215,28 @@ for (var i = 0; i < allDesktops.length; i++) {{
     d.writeConfig("Image", "file://{path}");
 }}
 """
-                subprocess.run(
-                    ["qdbus", "org.kde.plasmashell", "/PlasmaShell",
-                     "org.kde.PlasmaShell.evaluateScript", script],
-                    capture_output=True
-                )
-
+                commands = [[
+                    "qdbus", "org.kde.plasmashell", "/PlasmaShell",
+                    "org.kde.PlasmaShell.evaluateScript", script,
+                ]]
             elif "xfce" in desktop_env:
-                subprocess.run([
+                commands = [[
                     "xfconf-query", "-c", "xfce4-desktop",
                     "-p", "/backdrop/screen0/monitor0/workspace0/last-image",
-                    "-s", str(path)
-                ], capture_output=True)
-
+                    "-s", str(path),
+                ]]
             else:
+                commands = [["feh", "--bg-scale", str(path)]]
+
+            for command in commands:
                 result = subprocess.run(
-                    ["feh", "--bg-scale", str(path)],
-                    capture_output=True
+                    command, capture_output=True, text=True, timeout=10,
                 )
                 if result.returncode != 0:
-                    return (
-                        f"Could not set wallpaper automatically on {desktop_env}. "
-                        f"Try manually or install 'feh'."
-                    )
+                    detail = (result.stderr or result.stdout or "Wallpaper command failed.").strip()
+                    raise RuntimeError(detail[:400])
+            return f"Wallpaper set: {path.name}. Verified: desktop command returned success."
 
-            return f"Wallpaper set: {path.name}"
 
     except Exception as e:
         return f"Could not set wallpaper: {e}"

@@ -75,6 +75,8 @@ win10toast; sys_platform == "win32"
 pywin32;    sys_platform == "win32"
 wmi;        sys_platform == "win32"
 winrt-runtime>=3.2,<5; sys_platform == "win32"
+winrt-Windows.Foundation>=3.2,<5; sys_platform == "win32"
+winrt-Windows.Foundation.Collections>=3.2,<5; sys_platform == "win32"
 winrt-Windows.Devices.Geolocation>=3.2,<5; sys_platform == "win32"
 # pywinauto drives the Windows accessibility tree. Three plugins read it:
 # screen_agent (to aim without a model call), the WhatsApp pair, and

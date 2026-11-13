@@ -1,4 +1,5 @@
 from core.hardware_sensors import parse_lhm_cpu_temperature
+from actions import system_monitor
 
 
 def test_lhm_json_prefers_cpu_package_and_ignores_gpu_temperatures():
@@ -90,3 +91,31 @@ def test_lhm_json_supports_decimal_comma_sensor_values():
     reading = parse_lhm_cpu_temperature(payload)
 
     assert reading["temperature_c"] == 46.9
+
+
+
+def test_voice_system_status_uses_the_same_cpu_sensor_as_the_hud(monkeypatch):
+    monkeypatch.setattr(
+        system_monitor,
+        "get_cpu_temperature",
+        lambda: {
+            "temperature_c": 58.4,
+            "sensor": "CPU Package",
+            "provider": "LibreHardwareMonitor HTTP",
+        },
+    )
+
+    assert system_monitor._get_cpu_temp() == 58.4
+
+
+def test_voice_system_status_reports_unavailable_instead_of_guessing(monkeypatch):
+    monkeypatch.setattr(system_monitor, "get_cpu_temperature", lambda: None)
+    assert system_monitor._get_cpu_temp() == -1.0
+
+
+def test_voice_system_status_rejects_invalid_shared_sensor_data(monkeypatch):
+    monkeypatch.setattr(
+        system_monitor, "get_cpu_temperature",
+        lambda: {"temperature_c": 180.0, "sensor": "unknown"},
+    )
+    assert system_monitor._get_cpu_temp() == -1.0

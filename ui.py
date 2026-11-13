@@ -222,15 +222,31 @@ def _nvml_gpu_windows() -> float:
         return -1.0
 
 
+def _system_disk_root() -> str:
+    if _OS == "Windows":
+        return (os.environ.get("SystemDrive") or "C:").rstrip("\\/") + "\\"
+    return "/"
+
+
 class _SysMetrics:
     def __init__(self):
-        self.cpu  = 0.0
-        self.mem  = 0.0
-        self.net  = 0.0   
-        self.gpu  = -1.0  
-        self.tmp  = -1.0  
+        self.cpu = 0.0
+        self.mem = 0.0
+        self.net = 0.0
+        self.net_rx_mbps = 0.0
+        self.net_tx_mbps = 0.0
+        self.gpu = -1.0
+        self.tmp = -1.0
+        self.disk_percent = -1.0
+        self.disk_used_gb = None
+        self.disk_total_gb = None
+        self.disk_free_gb = None
+        self.disk_read_mbps = 0.0
+        self.disk_write_mbps = 0.0
+        self.disk_path = _system_disk_root()
         self._lock = threading.Lock()
         self._last_net = psutil.net_io_counters()
+        self._last_disk_io = psutil.disk_io_counters()
         self._last_net_t = time.time()
         self._running = True
         # Probe caches — GPU (NVML) and temperature (WMI) are the expensive
@@ -243,6 +259,9 @@ class _SysMetrics:
         self._nv_unix   = None         # cached (lib, dev) for Linux/macOS NVML
         self._wmi_conn  = None         # cached ACPI WMI connection
         self._wmi_ok    = None         # None=untested, False=unavailable here
+        self._wmi_gpu_conn = None
+        self._wmi_gpu_ok = None
+        self._gpu_provider = None
         self._lhwmi_conn = None       # LibreHardwareMonitor WMI, if user runs it
         self._lhwmi_ok = None
         self._lhwmi_last_probe = 0.0
@@ -261,17 +280,43 @@ class _SysMetrics:
         cpu = psutil.cpu_percent(interval=None)
         mem = psutil.virtual_memory().percent
 
-        nc  = psutil.net_io_counters()
+        nc = psutil.net_io_counters()
         now = time.time()
-        dt  = now - self._last_net_t
-        if dt > 0:
-            sent = (nc.bytes_sent - self._last_net.bytes_sent) / dt
-            recv = (nc.bytes_recv - self._last_net.bytes_recv) / dt
-            net  = (sent + recv) / (1024 * 1024)
-        else:
-            net = 0.0
-        self._last_net   = nc
+        dt = max(0.0, now - self._last_net_t)
+        sent_bps = recv_bps = 0.0
+        if dt > 0 and nc is not None and self._last_net is not None:
+            sent_bps = max(0, nc.bytes_sent - self._last_net.bytes_sent) / dt
+            recv_bps = max(0, nc.bytes_recv - self._last_net.bytes_recv) / dt
+        net = (sent_bps + recv_bps) / (1024 * 1024)
+        net_rx_mbps = recv_bps * 8.0 / 1_000_000.0
+        net_tx_mbps = sent_bps * 8.0 / 1_000_000.0
+        self._last_net = nc
         self._last_net_t = now
+
+        disk_percent = self.disk_percent
+        disk_used_gb = self.disk_used_gb
+        disk_total_gb = self.disk_total_gb
+        disk_free_gb = self.disk_free_gb
+        disk_read_mbps = self.disk_read_mbps
+        disk_write_mbps = self.disk_write_mbps
+        try:
+            usage = psutil.disk_usage(self.disk_path)
+            disk_percent = float(usage.percent)
+            disk_used_gb = usage.used / (1024 ** 3)
+            disk_total_gb = usage.total / (1024 ** 3)
+            disk_free_gb = usage.free / (1024 ** 3)
+        except Exception:
+            pass
+        try:
+            disk_io = psutil.disk_io_counters()
+            if dt > 0 and disk_io is not None and self._last_disk_io is not None:
+                read_bytes = max(0, disk_io.read_bytes - self._last_disk_io.read_bytes)
+                write_bytes = max(0, disk_io.write_bytes - self._last_disk_io.write_bytes)
+                disk_read_mbps = read_bytes / dt / (1024 ** 2)
+                disk_write_mbps = write_bytes / dt / (1024 ** 2)
+            self._last_disk_io = disk_io
+        except Exception:
+            pass
 
         # GPU and temperature change slowly and are the most expensive probes
         # (NVML / WMI) — refresh them every 3rd cycle (~6 s) instead of every
@@ -288,8 +333,16 @@ class _SysMetrics:
             self.cpu = cpu
             self.mem = mem
             self.net = net
+            self.net_rx_mbps = net_rx_mbps
+            self.net_tx_mbps = net_tx_mbps
             self.gpu = gpu
             self.tmp = tmp
+            self.disk_percent = disk_percent
+            self.disk_used_gb = disk_used_gb
+            self.disk_total_gb = disk_total_gb
+            self.disk_free_gb = disk_free_gb
+            self.disk_read_mbps = disk_read_mbps
+            self.disk_write_mbps = disk_write_mbps
 
     def _get_gpu(self) -> float:
         # pynvml — subprocess-free; initialise once and reuse the handle.
@@ -303,13 +356,19 @@ class _SysMetrics:
                     self._pynvml    = pynvml
                     self._pynvml_h  = pynvml.nvmlDeviceGetHandleByIndex(0)
                     self._pynvml_ok = True
+                self._gpu_provider = "NVIDIA NVML"
                 return float(self._pynvml.nvmlDeviceGetUtilizationRates(self._pynvml_h).gpu)
             except Exception:
                 self._pynvml_ok = False
 
-        # Windows: nvml.dll via ctypes (already cached in _nvml_gpu_windows)
+        # Windows: NVIDIA NVML first, then OS GPU-engine counters for adapters
+        # whose driver does not expose NVML (for example Intel/AMD integrated GPUs).
         if _OS == "Windows":
-            return _nvml_gpu_windows()
+            value = _nvml_gpu_windows()
+            if value >= 0:
+                self._gpu_provider = "NVIDIA NVML"
+                return value
+            return self._get_gpu_windows_wmi()
 
         # Linux / macOS: libnvidia-ml shared lib via ctypes — init once, reuse
         try:
@@ -335,6 +394,34 @@ class _SysMetrics:
 
         return -1.0   # N/A — zero subprocess on all platforms
 
+    def _get_gpu_windows_wmi(self) -> float:
+        if self._wmi_gpu_ok is False:
+            return -1.0
+        try:
+            if self._wmi_gpu_conn is None:
+                import wmi  # type: ignore
+                self._wmi_gpu_conn = wmi.WMI()
+            counters = self._wmi_gpu_conn.Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine()
+            values = []
+            for item in counters or []:
+                engine_name = str(getattr(item, "Name", "") or "").casefold()
+                if "_engtype_3d" not in engine_name:
+                    continue
+                try:
+                    value = float(getattr(item, "UtilizationPercentage", None))
+                except (TypeError, ValueError):
+                    continue
+                if 0.0 <= value <= 100.0:
+                    values.append(value)
+            if values:
+                self._wmi_gpu_ok = True
+                self._gpu_provider = "Windows GPU 3D engine counters"
+                return max(values)
+            self._wmi_gpu_ok = False
+        except Exception:
+            self._wmi_gpu_ok = False
+        return -1.0
+
     def _get_temp(self) -> float:
         # Share the same sensor resolver used by hardware_inventory.
         try:
@@ -354,8 +441,17 @@ class _SysMetrics:
                 "cpu": self.cpu,
                 "mem": self.mem,
                 "net": self.net,
+                "net_rx_mbps": self.net_rx_mbps,
+                "net_tx_mbps": self.net_tx_mbps,
                 "gpu": self.gpu,
                 "tmp": self.tmp,
+                "disk_percent": self.disk_percent,
+                "disk_used_gb": self.disk_used_gb,
+                "disk_total_gb": self.disk_total_gb,
+                "disk_free_gb": self.disk_free_gb,
+                "disk_read_mbps": self.disk_read_mbps,
+                "disk_write_mbps": self.disk_write_mbps,
+                "disk_path": self.disk_path,
             }
 
 
@@ -2867,6 +2963,7 @@ class MainWindow(QMainWindow):
     _access_sig = pyqtSignal(str, bool)            # live microphone/screen/keyboard/speaker access
     _app_update_check_sig = pyqtSignal(object)
     _app_update_download_sig = pyqtSignal(object)
+    _device_identity_sig = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
@@ -2888,6 +2985,7 @@ class MainWindow(QMainWindow):
         _cfg = _read_full_config()
         # Canonical product identity is code-controlled; stale preference values are ignored.
         self._assistant_name: str = "ORI"
+        self.device_identity: dict | None = None
         _display = self._assistant_name.upper()
 
         # Apply the saved UI colour BEFORE panels/stylesheets are built
@@ -2987,10 +3085,11 @@ class MainWindow(QMainWindow):
         # Video surface shares the same central stack as the waveform and camera.
         self._video_split = False        # is the sound a separate stream?
         self._video_auto_muted = False   # did ORI close the mic, or the user?
-        # A plain flag rather than reading the widget. video_is_playing() is
-        # called from plugin threads, and reading a widget's state from one is
-        # not something to rely on; an attribute is.
+        # These plain flags are read from action worker threads. _video_on means
+        # the video panel is open; _video_playback_confirmed changes only when
+        # Qt reports QMediaPlayer.PlayingState.
         self._video_on = False
+        self._video_playback_confirmed = False
         self._video_cont = QWidget()
         self._video_cont.setStyleSheet(f"background: {C.BG};")
         _vid_v = QVBoxLayout(self._video_cont)
@@ -3062,6 +3161,7 @@ class MainWindow(QMainWindow):
             self._video_item.nativeSizeChanged.connect(self._fit_video)
             self._video_player.setAudioOutput(self._video_audio)
             self._video_player.errorOccurred.connect(self._on_video_error)
+            self._video_player.playbackStateChanged.connect(self._on_video_playback_state_changed)
 
             # A SECOND player, for sound that arrives separately.
             #
@@ -3187,6 +3287,7 @@ class MainWindow(QMainWindow):
         self._weather_result_sig.connect(self._on_weather_result)
         self._location_access_sig.connect(self._on_device_location_result)
         self._location_weather_sig.connect(self._on_location_weather_result)
+        self._device_identity_sig.connect(self._apply_device_identity)
         self._location_request_inflight = False
         self._location_access_generation = 0
         self._location_generation = 0
@@ -3224,6 +3325,7 @@ class MainWindow(QMainWindow):
         self._weather_refresh_timer = QTimer(self)
         self._weather_refresh_timer.timeout.connect(self._refresh_saved_weather)
         self._weather_refresh_timer.start(15 * 60 * 1000)
+        QTimer.singleShot(500, self._detect_device_identity)
         QTimer.singleShot(1400, self._refresh_weather_if_enabled)
         QTimer.singleShot(2400, self._maybe_prompt_startup_location)
 
@@ -3351,13 +3453,22 @@ class MainWindow(QMainWindow):
             self._video_sound.setSource(QUrl())
         self._hud_cam_stack.setCurrentIndex(2)
         self._video_on = True
-        # Re-run now that the video counts as playing: _set_video_muted ran
+        self._video_playback_confirmed = False
+        # Re-run now that the video panel is open: _set_video_muted ran
         # before this line and saw no video, so its mic check was a no-op.
         self._sync_mic_for_video()
         self._video_player.play()
         if self._video_split:
             self._video_sound.play()
             self._video_sync.start()
+
+    def _on_video_playback_state_changed(self, state) -> None:
+        """Store Qt's real playback state for safe reads from action workers."""
+        self._video_playback_confirmed = bool(
+            self._video_on
+            and HAVE_VIDEO
+            and state == QMediaPlayer.PlaybackState.PlayingState
+        )
 
     def _fit_video(self, *_a) -> None:
         """Size the picture to the panel, keeping its shape."""
@@ -3381,6 +3492,7 @@ class MainWindow(QMainWindow):
         self._reset_video_players()
         self._video_split = False
         self._video_on = False
+        self._video_playback_confirmed = False
         self._hud_cam_stack.setCurrentIndex(0)
         self._sync_mic_for_video()      # gives the microphone back
 
@@ -3476,6 +3588,11 @@ class MainWindow(QMainWindow):
         self._video_close_sig.emit()
 
     def video_is_playing(self) -> bool:
+        """True only after Qt reports that the media player entered PlayingState."""
+        return bool(self._video_playback_confirmed)
+
+    def video_is_open(self) -> bool:
+        """True while the video panel is open, including buffering or paused states."""
         return bool(self._video_on)
 
     # ------------------------------------------------------------------
@@ -3801,6 +3918,15 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        # Preserve essential CPU/RAM/NET/GPU/DSK chips at the minimum window width.
+        # Optional weather, date and temperature collapse first on narrower windows.
+        width = self.width()
+        if hasattr(self, "_top_temp_lbl"):
+            self._top_temp_lbl.setVisible(width >= 1180)
+        if hasattr(self, "_top_weather_lbl"):
+            self._top_weather_lbl.setVisible(width >= 1360)
+        if hasattr(self, "_date_lbl"):
+            self._date_lbl.setVisible(width >= 1160)
         cw = self.centralWidget()
         if self._overlay and self._overlay.isVisible():
             ow, oh = 560, 470
@@ -3878,12 +4004,70 @@ class MainWindow(QMainWindow):
         net_pct = min(100, net * 10)  # 10 MB/s = %100
         self._bar_net.set_value(net_pct, net_str)
 
+        # Live network throughput. This is actual computer interface traffic,
+        # not an ISP bandwidth test.
+        rx_mbps = float(snap.get("net_rx_mbps", 0.0) or 0.0)
+        tx_mbps = float(snap.get("net_tx_mbps", 0.0) or 0.0)
+        if hasattr(self, "_top_net_lbl"):
+            self._top_net_lbl.set_metric(
+                rx_mbps + tx_mbps,
+                f"{rx_mbps:.1f}/{tx_mbps:.1f}M",
+                "both",
+                tooltip=(
+                    "Live computer network traffic, not an internet speed test. "
+                    f"Download: {rx_mbps:.2f} Mbps · Upload: {tx_mbps:.2f} Mbps"
+                ),
+                max_value=100.0,
+            )
+
         # GPU
         gpu = snap["gpu"]
         if gpu >= 0:
             self._bar_gpu.set_value(gpu, f"{gpu:.0f}%")
+            if hasattr(self, "_top_gpu_lbl"):
+                provider = getattr(_metrics, "_gpu_provider", None) or "GPU telemetry"
+                self._top_gpu_lbl.set_metric(
+                    gpu, f"{gpu:.0f}%",
+                    "both",
+                    tooltip=f"GPU utilisation: {gpu:.1f}% · Source: {provider}",
+                )
         else:
             self._bar_gpu.set_value(0, "N/A")
+            if hasattr(self, "_top_gpu_lbl"):
+                self._top_gpu_lbl.set_metric(
+                    None, "N/A", getattr(self, "_metrics_display_mode", "both"),
+                    tooltip=(
+                        "GPU utilisation is unavailable. NVIDIA NVML or Windows GPU "
+                        "3D-engine counters were not exposed by the active driver."
+                    ),
+                )
+
+        # System volume usage
+        raw_disk_percent = snap.get("disk_percent")
+        disk_percent = float(raw_disk_percent) if raw_disk_percent is not None else -1.0
+        if hasattr(self, "_top_disk_lbl"):
+            if disk_percent >= 0:
+                used = snap.get("disk_used_gb")
+                total = snap.get("disk_total_gb")
+                free = snap.get("disk_free_gb")
+                read_rate = float(snap.get("disk_read_mbps", 0.0) or 0.0)
+                write_rate = float(snap.get("disk_write_mbps", 0.0) or 0.0)
+                disk_detail = (
+                    f"System volume {snap.get('disk_path')}: {disk_percent:.1f}% used"
+                    + (f" ({used:.1f}/{total:.1f} GB; {free:.1f} GB free)" if used is not None and total is not None and free is not None else "")
+                    + f" · Disk read {read_rate:.2f} MB/s · write {write_rate:.2f} MB/s"
+                )
+                self._top_disk_lbl.set_metric(
+                    disk_percent, f"{disk_percent:.0f}%",
+                    "both",
+                    tooltip=disk_detail,
+                    warning=disk_percent >= 95,
+                )
+            else:
+                self._top_disk_lbl.set_metric(
+                    None, "N/A", getattr(self, "_metrics_display_mode", "both"),
+                    tooltip="System volume usage could not be read.",
+                )
 
         # TMP
         tmp = snap["tmp"]
@@ -4156,12 +4340,19 @@ class MainWindow(QMainWindow):
             self._metrics_display_mode = "both"
         self._top_cpu_lbl = MetricChip("CPU", C.PRI, 72)
         self._top_ram_lbl = MetricChip("RAM", C.PRI, 72)
+        self._top_net_lbl = MetricChip("NET", C.PRI, 104)
+        self._top_gpu_lbl = MetricChip("GPU", C.PRI, 68)
+        self._top_disk_lbl = MetricChip("DSK", C.PRI, 68)
         self._top_temp_lbl = MetricChip("TEMP", C.PRI, 84)
         self._top_weather_lbl = _top_chip(
             "WX OFF", 72,
             "Weather is off until you enable it in Settings."
         )
-        for _chip in (self._top_cpu_lbl, self._top_ram_lbl, self._top_temp_lbl, self._top_weather_lbl):
+        for _chip in (
+            self._top_cpu_lbl, self._top_ram_lbl, self._top_net_lbl,
+            self._top_gpu_lbl, self._top_disk_lbl, self._top_temp_lbl,
+            self._top_weather_lbl,
+        ):
             row.addWidget(_chip)
 
         self._clock_lbl = QLabel("--:--")
@@ -4450,11 +4641,31 @@ class MainWindow(QMainWindow):
             return self._settings_button(text, primary=primary)
 
         def page_layout():
+            # Keep category navigation fixed while allowing each settings page
+            # to scroll when its content exceeds the available window height.
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setStyleSheet(f"""
+                QScrollArea {{ background: transparent; border: 0; }}
+                QScrollBar:vertical {{ background: rgba(0, 8, 4, 160);
+                    width: 7px; margin: 2px; }}
+                QScrollBar::handle:vertical {{ background: {C.BORDER_B};
+                    min-height: 24px; border-radius: 3px; }}
+                QScrollBar::handle:vertical:hover {{ background: {C.PRI_DIM}; }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+                QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+            """)
             p = QWidget()
+            p.setStyleSheet("background: transparent;")
+            p.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             lay = QVBoxLayout(p)
             lay.setContentsMargins(0, 2, 0, 0)
             lay.setSpacing(10)
-            return p, lay
+            scroll.setWidget(p)
+            return scroll, lay
 
         # AI & PROFILE -------------------------------------------------------
         p0, l0 = page_layout()
@@ -4744,17 +4955,12 @@ class MainWindow(QMainWindow):
         about.addWidget(self._app_update_status_lbl)
         update_actions = QHBoxLayout()
         update_actions.setSpacing(8)
-        self._check_updates_btn = button("CHECK FOR UPDATES", True)
+        self._check_updates_btn = button("CHECK & UPDATE", True)
+        self._check_updates_btn.setToolTip(
+            "Check the latest release, download and verify it, then install and restart ORI."
+        )
         self._check_updates_btn.clicked.connect(self._check_app_updates)
         update_actions.addWidget(self._check_updates_btn)
-        self._download_update_btn = button("DOWNLOAD UPDATE")
-        self._download_update_btn.setEnabled(False)
-        self._download_update_btn.clicked.connect(self._download_app_update)
-        update_actions.addWidget(self._download_update_btn)
-        self._install_update_btn = button("INSTALL & RESTART")
-        self._install_update_btn.setEnabled(False)
-        self._install_update_btn.clicked.connect(self._install_app_update)
-        update_actions.addWidget(self._install_update_btn)
         update_actions.addStretch(1)
         about.addLayout(update_actions)
 
@@ -4824,22 +5030,9 @@ class MainWindow(QMainWindow):
             self._sensor_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
 
     def _recheck_temperature_sensor(self) -> None:
-        # Reset the cached WMI state. The background metric thread will re-probe
-        # the supported hardware providers on its next slow cycle.
-        for attr in ("_lhwmi_conn", "_wmi_conn"):
-            try:
-                setattr(_metrics, attr, None)
-            except Exception:
-                pass
-        for attr in ("_lhwmi_ok", "_wmi_ok"):
-            try:
-                setattr(_metrics, attr, None)
-            except Exception:
-                pass
-        try:
-            _metrics._slow_tick = 0
-        except Exception:
-            pass
+        # The shared sensor resolver does not cache hardware handles. Force the
+        # background metrics loop to query it on its next slow cycle.
+        _metrics._slow_tick = 0
         self._sensor_status_lbl.setText("Rechecking hardware temperature sensors…")
         QTimer.singleShot(2600, self._finish_temperature_sensor_recheck)
 
@@ -4871,93 +5064,146 @@ class MainWindow(QMainWindow):
         return label
 
     def _check_app_updates(self) -> None:
-        if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(False)
-            self._check_updates_btn.setText("CHECKING…")
+        """Run the complete check → download → verify → install update flow."""
+        button = getattr(self, "_check_updates_btn", None)
+        if button is not None:
+            button.setEnabled(False)
+            button.setText("CHECKING…")
         if hasattr(self, "_app_update_status_lbl"):
-            self._app_update_status_lbl.setText("Checking the configured official GitHub repository…")
+            self._app_update_status_lbl.setText(
+                "Checking the official ORI release. No files will be changed unless a verified update is available."
+            )
+
         def worker():
             try:
                 from core.app_updater import check_for_updates
                 result = check_for_updates()
             except Exception as exc:
-                result = {"ok": False, "message": f"Update check failed: {type(exc).__name__}: {exc}"}
+                result = {
+                    "ok": False,
+                    "message": f"Update check failed: {type(exc).__name__}: {exc}",
+                }
             self._app_update_check_sig.emit(result)
+
         threading.Thread(target=worker, name="ori-update-check", daemon=True).start()
 
     def _apply_app_update_check(self, result: object) -> None:
-        data = result if isinstance(result, dict) else {"ok": False, "message": "Invalid update response."}
+        data = result if isinstance(result, dict) else {
+            "ok": False, "message": "Invalid update response."
+        }
+        if not data.get("ok"):
+            self._finish_update_flow(
+                str(data.get("message") or "Could not check for updates."), success=False
+            )
+            return
+        if not data.get("update_available"):
+            self._finish_update_flow(
+                str(data.get("message") or "ORI is up to date."), success=True
+            )
+            return
+
+        if not isinstance(data.get("asset"), dict) or not isinstance(data.get("checksum_asset"), dict):
+            self._finish_update_flow(
+                "A newer release exists, but its Windows package or SHA-256 checksum is missing. "
+                "No update was downloaded or installed.",
+                success=False,
+            )
+            return
+
+        if platform.system() != "Windows" or not getattr(sys, "frozen", False):
+            self._finish_update_flow(
+                f"ORI {data.get('latest_version')} is available, but automatic installation "
+                "requires the packaged Windows application. This source build was left unchanged.",
+                success=False,
+            )
+            return
+
         self._latest_update_info = data
         if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(True)
-            self._check_updates_btn.setText("CHECK FOR UPDATES")
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(bool(data.get("ok") and data.get("update_available") and data.get("asset") and data.get("checksum_asset")))
+            self._check_updates_btn.setText("DOWNLOADING…")
         if hasattr(self, "_app_update_status_lbl"):
-            if data.get("ok") and data.get("update_available"):
-                self._app_update_status_lbl.setText(
-                    f"UPDATE AVAILABLE · ORI {data.get('latest_version')} · SHA-256 verification required before install."
-                )
-                self._app_update_status_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
-            else:
-                self._app_update_status_lbl.setText(str(data.get("message") or "No update information."))
-                self._app_update_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM if data.get('ok') else C.ACC}; background: transparent;")
+            self._app_update_status_lbl.setText(
+                f"ORI {data.get('latest_version')} is available. Downloading the release and "
+                "verifying its SHA-256 checksum…"
+            )
+        self._download_app_update(data)
 
-    def _download_app_update(self) -> None:
-        info = getattr(self, "_latest_update_info", None)
-        if not isinstance(info, dict) or not info.get("update_available"):
-            return
-        self._download_update_btn.setEnabled(False)
-        self._download_update_btn.setText("DOWNLOADING…")
-        if hasattr(self, "_app_update_status_lbl"):
-            self._app_update_status_lbl.setText("Downloading release and verifying its SHA-256 checksum…")
+    def _download_app_update(self, info: dict) -> None:
+        """Download and stage the already-checked release off the UI thread."""
+        if hasattr(self, "_check_updates_btn"):
+            self._check_updates_btn.setEnabled(False)
+            self._check_updates_btn.setText("DOWNLOADING…")
+
         def worker():
             try:
                 from core.app_updater import download_latest_update
                 result = download_latest_update(info)
             except Exception as exc:
-                result = {"ok": False, "message": f"Update download failed: {type(exc).__name__}: {exc}"}
+                result = {
+                    "ok": False,
+                    "message": f"Update download failed: {type(exc).__name__}: {exc}",
+                }
             self._app_update_download_sig.emit(result)
+
         threading.Thread(target=worker, name="ori-update-download", daemon=True).start()
 
     def _apply_app_update_download(self, result: object) -> None:
-        data = result if isinstance(result, dict) else {"ok": False, "message": "Invalid download response."}
-        self._staged_update = data if data.get("ok") else None
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(False)
-            self._download_update_btn.setText("DOWNLOAD UPDATE")
-        frozen = bool(getattr(sys, "frozen", False))
-        if hasattr(self, "_install_update_btn"):
-            self._install_update_btn.setEnabled(bool(data.get("ok") and frozen))
-        if hasattr(self, "_app_update_status_lbl"):
-            message = str(data.get("message") or "Update download finished.")
-            if data.get("ok") and not frozen:
-                message += " Source/development build detected: close ORI, then replace the source folder with the verified release package or update through Git."
-            self._app_update_status_lbl.setText(message)
-            self._app_update_status_lbl.setStyleSheet(f"color: {C.GREEN if data.get('ok') else C.ACC}; background: transparent;")
+        data = result if isinstance(result, dict) else {
+            "ok": False, "message": "Invalid update download response."
+        }
+        if not data.get("ok") or not data.get("staged_dir"):
+            self._finish_update_flow(
+                str(data.get("message") or "Update download or verification failed."),
+                success=False,
+            )
+            return
 
-    def _install_app_update(self) -> None:
-        data = getattr(self, "_staged_update", None)
-        if not isinstance(data, dict) or not data.get("staged_dir"):
+        if platform.system() != "Windows" or not getattr(sys, "frozen", False):
+            self._finish_update_flow(
+                "The update package was verified, but this source build cannot replace itself. "
+                "The running application was left unchanged.",
+                success=False,
+            )
             return
-        answer = QMessageBox.question(
-            self, "Install ORI update?",
-            "ORI will close, replace its program files, preserve your configuration and memory, then restart. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
+
+        if hasattr(self, "_check_updates_btn"):
+            self._check_updates_btn.setText("INSTALLING…")
+        if hasattr(self, "_app_update_status_lbl"):
+            self._app_update_status_lbl.setText(
+                f"ORI {data.get('version') or 'update'} downloaded and SHA-256 verified. "
+                "Starting the Windows installer and preparing to restart…"
+            )
         try:
             from core.app_updater import schedule_windows_update
-            result = schedule_windows_update(str(data["staged_dir"]))
-            if not result.get("ok"):
-                self._app_update_status_lbl.setText(str(result.get("message")))
+            scheduled = schedule_windows_update(str(data["staged_dir"]))
+            if not scheduled.get("ok"):
+                self._finish_update_flow(
+                    str(scheduled.get("message") or "Could not start the update installer."),
+                    success=False,
+                )
                 return
-            self._app_update_status_lbl.setText(str(result.get("message")))
+            if hasattr(self, "_app_update_status_lbl"):
+                self._app_update_status_lbl.setText(str(scheduled.get("message") or (
+                    "The verified update installer started. ORI will close and restart."
+                )))
             QApplication.quit()
         except Exception as exc:
-            self._app_update_status_lbl.setText(f"Could not schedule update: {type(exc).__name__}: {exc}")
+            self._finish_update_flow(
+                f"Could not start the update installer: {type(exc).__name__}: {exc}",
+                success=False,
+            )
+
+    def _finish_update_flow(self, message: str, *, success: bool) -> None:
+        button = getattr(self, "_check_updates_btn", None)
+        if button is not None:
+            button.setEnabled(True)
+            button.setText("CHECK & UPDATE")
+        label = getattr(self, "_app_update_status_lbl", None)
+        if label is not None:
+            label.setText(str(message or "Update flow finished."))
+            label.setStyleSheet(
+                f"color: {C.GREEN if success else C.ACC}; background: transparent;"
+            )
 
     def _refresh_settings_status(self):
         if not hasattr(self, "_gemini_status"):
@@ -6647,6 +6893,37 @@ class MainWindow(QMainWindow):
         if self.on_text_command:
             threading.Thread(target=self.on_text_command, args=(msg,), daemon=True).start()
 
+    def _detect_device_identity(self) -> None:
+        """Read device model information off the UI thread; no serials or device IDs."""
+        def worker():
+            try:
+                from core.device_identity import get_device_identity
+                result = get_device_identity()
+            except Exception as exc:
+                result = {
+                    "ok": False, "form_factor": "PC", "manufacturer": None,
+                    "model": None, "label": "PC · model unavailable",
+                    "source": f"device detection failed: {type(exc).__name__}",
+                }
+            self._device_identity_sig.emit(result)
+
+        threading.Thread(target=worker, name="ori-device-identity", daemon=True).start()
+
+    def _apply_device_identity(self, result: object) -> None:
+        data = result if isinstance(result, dict) else {}
+        self.device_identity = dict(data)
+        label = str(data.get("label") or "PC · model unavailable")
+        if len(label) > 54:
+            label = label[:51].rstrip() + "…"
+        widget = getattr(self, "_device_identity_lbl", None)
+        if widget is not None:
+            widget.setText("DEVICE: " + label)
+            widget.setToolTip(
+                f"Detected device: {data.get('label') or 'model unavailable'}\n"
+                f"Detection source: {data.get('source') or 'not available'}\n"
+                "ORI does not collect serial numbers, MAC addresses or product keys."
+            )
+
     def _build_footer(self) -> QWidget:
         w = QFrame()
         w.setObjectName("TerminalFooter")
@@ -6659,7 +6936,12 @@ class MainWindow(QMainWindow):
         left.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         lay.addWidget(left)
         lay.addStretch(1)
-        right = QLabel("ORI 3.5.0 // LIVE DESKTOP")
+        self._device_identity_lbl = QLabel("DEVICE: DETECTING…")
+        self._device_identity_lbl.setFont(QFont(UI_FONT, 7, QFont.Weight.Bold))
+        self._device_identity_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        self._device_identity_lbl.setMaximumWidth(450)
+        lay.addWidget(self._device_identity_lbl)
+        right = QLabel(f"ORI {APP_VERSION} // LIVE DESKTOP")
         right.setFont(QFont(UI_FONT, 7, QFont.Weight.Bold))
         right.setStyleSheet(f"color: {C.PRI_DIM}; background: transparent;")
         lay.addWidget(right)
@@ -7517,6 +7799,11 @@ class JarvisUI:
         if v != self._win._muted:
             self._win._toggle_mute()
 
+    @property
+    def device_identity(self) -> dict | None:
+        """Read-only hardware identity detected by the main window."""
+        return self._win.device_identity
+
     def set_muted_from_remote(self, muted: bool | None = None) -> bool:
         """Expose remote microphone control through the public JarvisUI facade."""
         return self._win.set_muted_from_remote(muted)
@@ -7762,6 +8049,9 @@ class JarvisUI:
 
     def video_is_playing(self) -> bool:
         return bool(self._win.video_is_playing())
+
+    def video_is_open(self) -> bool:
+        return bool(self._win.video_is_open())
 
     def start_camera_stream(self) -> None:
         """Thread-safe: start live camera feed in the full HUD area."""

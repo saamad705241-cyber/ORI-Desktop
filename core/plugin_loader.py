@@ -91,7 +91,13 @@ class PluginRegistry:
         if not get_plugin_enabled(name):
             return f"The '{name}' plugin is currently disabled."
         try:
-            return _call_run(rec.run, parameters, player, session_memory) or "Done."
+            result = _call_run(rec.run, parameters, player, session_memory)
+            if result is None or (isinstance(result, str) and not result.strip()):
+                return (
+                    f"Plugin '{name}' returned no confirmation. "
+                    "The outcome is unverified; do not report this action as successful."
+                )
+            return result if isinstance(result, str) else str(result)
         except Exception as e:
             self._logger(f"Plugin '{name}' crashed during run(): {e}")
             self._notify(f"Plugin '{name}' failed — see the console for details.")

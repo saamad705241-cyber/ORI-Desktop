@@ -303,13 +303,13 @@ def brightness_down():
         except Exception as e:
             print(f"[Settings] Brightness down failed on Windows: {e}")
 
-def close_app():
-    if _OS == "Darwin": pyautogui.hotkey("command", "q")
-    else:               pyautogui.hotkey("alt", "f4")
+def close_app(title: str = ""):
+    from actions.computer_control import _close_window
+    return _close_window(title)
 
-def close_window():
-    if _OS == "Darwin": pyautogui.hotkey("command", "w")
-    else:               pyautogui.hotkey("ctrl", "w")
+def close_window(title: str = ""):
+    from actions.computer_control import _close_window
+    return _close_window(title)
 
 def full_screen():
     if _OS == "Darwin": pyautogui.hotkey("ctrl", "command", "f")
@@ -602,54 +602,116 @@ def dark_mode():
         except Exception as e:
             print(f"[Settings] dark_mode Linux failed: {e}")
 
-def toggle_wifi():
+def _completed_command(command: list[str], *, timeout: float = 12.0) -> subprocess.CompletedProcess:
+    """Run a system command and reject non-zero exit codes."""
+    run_options = dict(_WIN_HIDE) if _OS == "Windows" else {}
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **run_options,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "The operating system rejected the command.").strip()
+        raise RuntimeError(detail[:400])
+    return result
+
+
+def toggle_wifi() -> str:
+    """Toggle Wi-Fi and read the adapter/radio state back before reporting."""
     if _OS == "Darwin":
         iface = _get_macos_wifi_interface()
-        result = subprocess.run(
-            ["networksetup", "-getairportpower", iface],
-            capture_output=True, text=True
+        before = _completed_command(["networksetup", "-getairportpower", iface], timeout=6)
+        is_on = before.stdout.strip().lower().endswith("on")
+        expected = "off" if is_on else "on"
+        _completed_command(["networksetup", "-setairportpower", iface, expected], timeout=10)
+        after = _completed_command(["networksetup", "-getairportpower", iface], timeout=6)
+        actual = "on" if after.stdout.strip().lower().endswith("on") else "off"
+        if actual != expected:
+            raise RuntimeError(f"Wi-Fi state did not change to {expected}. Current response: {after.stdout.strip()}")
+        return f"Wi-Fi is now {actual.upper()}. Verified by networksetup."
+
+    if _OS == "Windows":
+        script = r"""
+$adapter = Get-NetAdapter | Where-Object {$_.PhysicalMediaType -eq 'Native 802.11'} | Select-Object -First 1
+if ($null -eq $adapter) { throw 'No Wi-Fi adapter was found.' }
+$expected = if ([string]$adapter.AdminStatus -eq 'Up') { 'Down' } else { 'Up' }
+if ($expected -eq 'Down') {
+    Disable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction Stop
+} else {
+    Enable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction Stop
+}
+Start-Sleep -Milliseconds 900
+$after = Get-NetAdapter -Name $adapter.Name -ErrorAction Stop
+$actual = [string]$after.AdminStatus
+if ($actual -ne $expected) { throw "Wi-Fi AdminStatus is $actual; expected $expected." }
+[pscustomobject]@{ name = $after.Name; admin_status = $actual } | ConvertTo-Json -Compress
+"""
+        result = _completed_command([
+            "powershell", "-NoProfile", "-NonInteractive", "-Command", script,
+        ], timeout=15)
+        try:
+            data = json.loads(result.stdout.strip().splitlines()[-1])
+            status = str(data.get("admin_status") or "").strip()
+        except Exception as exc:
+            raise RuntimeError("Windows did not return a readable Wi-Fi adapter state.") from exc
+        if status not in ("Up", "Down"):
+            raise RuntimeError(f"Windows Wi-Fi adapter returned an unexpected administrative state: {status or 'unknown'}.")
+        return f"Wi-Fi adapter administrative state is {status}. Verified by reading it back."
+
+    before = _completed_command(["nmcli", "-t", "-f", "WIFI", "radio"], timeout=6)
+    current = before.stdout.strip().lower()
+    if current not in ("enabled", "disabled"):
+        raise RuntimeError(f"Could not read Linux Wi-Fi radio state: {current or 'empty response'}.")
+    expected = "disabled" if current == "enabled" else "enabled"
+    command_state = "off" if expected == "disabled" else "on"
+    _completed_command(["nmcli", "radio", "wifi", command_state], timeout=10)
+    after = _completed_command(["nmcli", "-t", "-f", "WIFI", "radio"], timeout=6)
+    actual = after.stdout.strip().lower()
+    if actual != expected:
+        raise RuntimeError(f"Wi-Fi radio did not change to {expected}. Current state: {actual or 'unknown'}.")
+    return f"Wi-Fi is now {actual.upper()}. Verified by nmcli."
+
+
+def _schedule_power_action(action: str) -> str:
+    """Report OS command acceptance, not a claim that shutdown/restart already happened."""
+    if _OS == "Windows":
+        mode = "/r" if action == "restart" else "/s"
+        result = _completed_command(["shutdown", mode, "/t", "10"], timeout=6)
+        detail = result.stdout.strip() or result.stderr.strip()
+        return (
+            f"Windows accepted the {action} request and scheduled it for 10 seconds from now. "
+            "The actual restart/shutdown has not happened yet."
+            + (f" OS response: {detail}" if detail else "")
         )
-        state = "off" if "On" in result.stdout else "on"
-        subprocess.run(["networksetup", "-setairportpower", iface, state],
-            capture_output=True)
-    elif _OS == "Windows":
-        try:
-            subprocess.run(
-                ["powershell", "-Command",
-                 "$adapter = Get-NetAdapter | Where-Object {$_.PhysicalMediaType -eq 'Native 802.11'};"
-                 "if ($adapter.Status -eq 'Up') { Disable-NetAdapter -Name $adapter.Name -Confirm:$false }"
-                 "else { Enable-NetAdapter -Name $adapter.Name -Confirm:$false }"],
-                capture_output=True, timeout=10, **_WIN_HIDE
-            )
-        except Exception as e:
-            print(f"[Settings] toggle_wifi Windows failed: {e}")
-    else:
-        try:
-            result = subprocess.run(["nmcli", "radio", "wifi"], capture_output=True, text=True)
-            state  = "off" if "enabled" in result.stdout else "on"
-            subprocess.run(["nmcli", "radio", "wifi", state], capture_output=True)
-        except Exception as e:
-            print(f"[Settings] toggle_wifi Linux failed: {e}")
+    if _OS == "Darwin":
+        command = (
+            'tell application "System Events" to restart'
+            if action == "restart"
+            else 'tell application "System Events" to shut down'
+        )
+        result = _completed_command(["osascript", "-e", command], timeout=10)
+        detail = result.stdout.strip()
+        return (
+            f"macOS accepted the {action} request. The actual power transition has not been observed yet."
+            + (f" OS response: {detail}" if detail else "")
+        )
+    verb = "reboot" if action == "restart" else "poweroff"
+    result = _completed_command(["systemctl", verb], timeout=10)
+    detail = result.stdout.strip()
+    return (
+        f"systemd accepted the {action} request. The actual power transition has not been observed yet."
+        + (f" OS response: {detail}" if detail else "")
+    )
 
-def restart_computer():
-    if _OS == "Windows":
-        subprocess.run(["shutdown", "/r", "/t", "10"], capture_output=True, **_WIN_HIDE)
-    elif _OS == "Darwin":
-        subprocess.run(["osascript", "-e",
-            'tell application "System Events" to restart'],
-            capture_output=True)
-    else:
-        subprocess.run(["systemctl", "reboot"], capture_output=True)
 
-def shutdown_computer():
-    if _OS == "Windows":
-        subprocess.run(["shutdown", "/s", "/t", "10"], capture_output=True)
-    elif _OS == "Darwin":
-        subprocess.run(["osascript", "-e",
-            'tell application "System Events" to shut down'],
-            capture_output=True)
-    else:
-        subprocess.run(["systemctl", "poweroff"], capture_output=True)
+def restart_computer() -> str:
+    return _schedule_power_action("restart")
+
+
+def shutdown_computer() -> str:
+    return _schedule_power_action("shutdown")
 
 ACTION_MAP: dict[str, callable] = {
     "volume_up":           volume_up,
@@ -846,9 +908,6 @@ def computer_settings(
     player=None,
     session_memory=None,
 ) -> str:
-    if not _PYAUTOGUI:
-        return "pyautogui is not installed. Run: pip install pyautogui"
-
     params      = parameters or {}
     raw_action  = params.get("action", "").strip()
     description = params.get("description", "").strip()
@@ -861,6 +920,22 @@ def computer_settings(
             value = detected.get("value")
 
     action = raw_action.lower().strip().replace(" ", "_").replace("-", "_")
+
+    if action in ("close_app", "close_window"):
+        title = str(value or params.get("title") or description or "").strip()
+        if not title:
+            return (
+                "Please specify the application or window title to close. "
+                "No keyboard shortcut was sent."
+            )
+        try:
+            from actions.computer_control import _close_window
+            return _close_window(title)
+        except Exception as exc:
+            return f"Could not safely close '{title}': {type(exc).__name__}: {exc}"
+
+    if not _PYAUTOGUI and action not in _IRREVERSIBLE:
+        return "PyAutoGUI is not installed. This computer action is unavailable."
 
     if not action:
         return _suggest(description or raw_action)
@@ -882,9 +957,18 @@ def computer_settings(
         if confirm.pending_title():
             return ("There is already a confirmation waiting on screen. "
                     "Ask the user to answer that one first.")
+        def run_confirmed(f=func, a=action):
+            outcome = f()
+            if outcome is None or (isinstance(outcome, str) and not outcome.strip()):
+                return (
+                    f"Confirmation was accepted for '{a}', but the operating system "
+                    "returned no confirmation. The outcome is unverified."
+                )
+            return outcome if isinstance(outcome, str) else str(outcome)
+
         return confirm.request(
             key=action, title=title, detail=detail,
-            run=lambda f=func, a=action: (f(), f"{a} done.")[1],
+            run=run_confirmed,
         )
 
     if action == "volume_set":
@@ -892,10 +976,20 @@ def computer_settings(
             target = int(value if value is not None else 50)
             before = volume_get()
             volume_set(target)
-            if before is not None:
-                push_undo(f"volume {before}% → {target}%",
+            after = volume_get()
+            if after is None:
+                return (
+                    f"Volume set was requested at {target}%, but the new level could not "
+                    "be read back. The result is unverified."
+                )
+            if abs(after - target) > 3:
+                return (
+                    f"Volume did not reach {target}%. The current verified level is {after}%."
+                )
+            if before is not None and before != after:
+                push_undo(f"volume {before}% → {after}%",
                           lambda b=before: (volume_set(b), f"Back to {b}%.")[1])
-            return f"Volume set to {target}%."
+            return f"Volume set to {after}%. Verified by reading the device level back."
         except Exception as e:
             return f"Could not set volume: {e}"
 
@@ -905,29 +999,35 @@ def computer_settings(
             return "No text provided to type."
         enter_after = str(params.get("press_enter", "false")).lower() in ("true", "1", "yes")
         type_text(text, press_enter_after=enter_after)
-        return f"Typed: {text[:80]}"
+        return (
+            f"Sent text input to the focused control ({min(len(text), 80)} characters shown). "
+            "The field contents were not read back, so the resulting application state is unverified."
+        )
 
     if action == "press_key":
         key = str(value or params.get("key", "")).strip()
         if not key:
             return "No key specified."
         press_key(key)
-        return f"Pressed: {key}"
+        return f"Sent the '{key}' key event. The resulting application state was not verified."
 
     if action in ("reload_n", "refresh_n", "reload_page_n"):
         try:
             reload_page_n(int(value or 1))
-            return f"Reloaded {value or 1} time(s)."
+            return (
+                f"Sent the refresh shortcut {value or 1} time(s). "
+                "The page load result was not verified."
+            )
         except Exception as e:
             return f"Reload failed: {e}"
 
     if action == "scroll_up":
         scroll_up(int(value or 500))
-        return "Scrolled up."
+        return "Scroll-up input was sent; the resulting page position was not verified."
 
     if action == "scroll_down":
         scroll_down(int(value or 500))
-        return "Scrolled down."
+        return "Scroll-down input was sent; the resulting page position was not verified."
 
     func = ACTION_MAP.get(action)
     if not func:
@@ -964,7 +1064,20 @@ def computer_settings(
         push_undo("dark mode toggled",
                   lambda: (dark_mode(), "Theme switched back.")[1])
 
-    return f"Done: {action}."
+    if action in ("volume_up", "volume_down"):
+        current = volume_get()
+        if current is None:
+            return f"{action} input was sent, but the current volume could not be read back."
+        return f"Volume is now {current}%. Verified by reading the device level back."
+    if action in ("brightness_up", "brightness_down"):
+        current = brightness_get()
+        if current is None:
+            return f"{action} was requested, but brightness could not be read back."
+        return f"Brightness is now {current}%. Verified by reading the display level back."
+    return (
+        f"Action '{action}' was dispatched, but its resulting state was not read back. "
+        "Do not report it as completed."
+    )
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
@@ -1012,7 +1125,7 @@ TOOL = {
             },
             "value": {
                 "type": "STRING",
-                "description": "Optional value: volume level 0-100, text to type, key name, etc."
+                "description": "Optional value: volume level 0-100, text to type, key name, or the visible application/window title for close_app and close_window."
             }
         },
         "required": []

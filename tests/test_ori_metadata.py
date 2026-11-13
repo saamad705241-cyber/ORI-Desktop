@@ -82,6 +82,12 @@ class ORIMetadataTests(unittest.TestCase):
         # The text must clarify that November 2026 is a plan, not a completed release
         self.assertIn("plan", meta.ABOUT_TEXT.lower())
 
+    def test_about_does_not_list_implemented_updater_as_coming_soon(self):
+        coming_soon = meta.ABOUT_TEXT.split("Coming soon / not enabled in this build", 1)[-1]
+        self.assertNotIn("GitHub release checks", coming_soon)
+        self.assertIn("SHA-256", meta.ABOUT_TEXT)
+        self.assertIn("candidate is not a published release yet", meta.ABOUT_TEXT)
+
     # ------------------------------------------------------------------
     # ASSISTANT_KNOWLEDGE_TEXT completeness
     # ------------------------------------------------------------------

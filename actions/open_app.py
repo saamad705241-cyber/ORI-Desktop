@@ -77,28 +77,136 @@ def _normalize(raw: str) -> str:
 
     return raw  
 
-def _launch_windows(app_name: str) -> bool:
+_WINDOWS_PROCESS_ALIASES = {
+    "notepad": {"notepad.exe"},
+    "chrome": {"chrome.exe"},
+    "msedge": {"msedge.exe"},
+    "firefox": {"firefox.exe"},
+    "brave": {"brave.exe"},
+    "code": {"code.exe"},
+    "spotify": {"spotify.exe"},
+    "vlc": {"vlc.exe"},
+    "discord": {"discord.exe"},
+    "telegram": {"telegram.exe"},
+    "whatsapp": {"whatsapp.exe"},
+    "slack": {"slack.exe"},
+    "zoom": {"zoom.exe"},
+    "msteams": {"ms-teams.exe", "teams.exe"},
+    "steam": {"steam.exe"},
+    "explorer": {"explorer.exe"},
+    "taskmgr": {"taskmgr.exe"},
+    "calc": {"calculatorapp.exe", "calc.exe"},
+    "mspaint": {"mspaint.exe"},
+    "systemsettings": {"systemsettings.exe"},
+}
 
-    if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
+
+def _windows_expected_process_names(app_name: str) -> set[str]:
+    basename = app_name.replace("/", "\\").rsplit("\\", 1)[-1].lower()
+    stem = basename.rsplit(".", 1)[0]
+    return set(_WINDOWS_PROCESS_ALIASES.get(stem, {basename if basename.endswith(".exe") else stem + ".exe"}))
+
+
+def _windows_running_process_ids(app_name: str) -> set[int]:
+    if not _PSUTIL:
+        return set()
+    expected = _windows_expected_process_names(app_name)
+    found = set()
+    try:
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                name = str(proc.info.get("name") or "").lower()
+                if name in expected:
+                    found.add(int(proc.info["pid"]))
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError, TypeError, ValueError):
+                continue
+    except Exception:
+        pass
+    return found
+
+
+def _windows_visible_process_ids() -> set[int]:
+    """Collect PIDs that own visible, titled top-level Windows windows."""
+    try:
+        import win32gui
+        import win32process
+    except Exception:
+        return set()
+
+    found: set[int] = set()
+
+    def collect(hwnd, _extra):
+        try:
+            if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd).strip():
+                _thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+                found.add(int(pid))
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(collect, None)
+    except Exception:
+        return set()
+    return found
+
+
+def _windows_app_visible(app_name: str) -> bool:
+    """Require a running process that owns a visible top-level window."""
+    running = _windows_running_process_ids(app_name)
+    visible = _windows_visible_process_ids()
+    if running and visible:
+        return bool(running & visible)
+
+    # Best-effort title fallback for system apps and environments without pywin32.
+    title_hints = {
+        "ms-settings:": "Settings",
+        "taskmgr.exe": "Task Manager",
+        "notepad.exe": "Notepad",
+        "calc.exe": "Calculator",
+    }
+    hint = title_hints.get(app_name.lower(), app_name.rsplit(".", 1)[0])
+    try:
+        import pygetwindow
+        return any(
+            hint.casefold() in str(window.title).casefold()
+            and bool(getattr(window, "visible", True))
+            for window in pygetwindow.getAllWindows()
+        )
+    except Exception:
+        return False
+
+
+def _wait_for_windows_app(app_name: str, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        if _windows_app_visible(app_name):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
+
+
+def _launch_windows(app_name: str) -> bool:
+    executable = shutil.which(app_name) or shutil.which(app_name.split(".")[0])
+    if executable:
         try:
             subprocess.Popen(
-                app_name,
-                shell=True,
+                [executable],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            time.sleep(1.5)
-            return True
-        except Exception as e:
-            print(f"[open_app] subprocess failed: {e}")
+            return _wait_for_windows_app(app_name)
+        except Exception as exc:
+            print(f"[open_app] executable launch failed: {exc}")
 
     if ":" in app_name:
         try:
-            subprocess.Popen(f"start {app_name}", shell=True)
-            time.sleep(1.0)
-            return True
-        except Exception:
-            pass
+            import os
+            os.startfile(app_name)  # Windows ShellExecute for URI/app protocols
+            return _wait_for_windows_app(app_name)
+        except Exception as exc:
+            print(f"[open_app] URI/app launch failed: {exc}")
 
     try:
         import pyautogui
@@ -108,10 +216,10 @@ def _launch_windows(app_name: str) -> bool:
         pyautogui.write(app_name, interval=0.05)
         time.sleep(0.9)
         pyautogui.press("enter")
-        time.sleep(2.5)
-        return True
-    except Exception as e:
-        print(f"[open_app] Start Menu search failed: {e}")
+        if _wait_for_windows_app(app_name, timeout=5.0):
+            return True
+    except Exception as exc:
+        print(f"[open_app] Start Menu search failed: {exc}")
 
     return False
 
@@ -265,8 +373,8 @@ def open_app(
             if launcher(app_name):
                 return f"Opened {app_name}."
         return (
-            f"Could not confirm that {app_name} launched. "
-            f"It may still be loading, or it might not be installed."
+            f"A launch request was sent for {app_name}, but ORI could not verify "
+            "that a visible application window opened. It will not report this as success."
         )
     except Exception as e:
         print(f"[open_app] Error: {e}")
