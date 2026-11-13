@@ -602,54 +602,113 @@ def dark_mode():
         except Exception as e:
             print(f"[Settings] dark_mode Linux failed: {e}")
 
-def toggle_wifi():
+def _completed_command(command: list[str], *, timeout: float = 12.0) -> subprocess.CompletedProcess:
+    """Run a system command and reject non-zero exit codes."""
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **_WIN_HIDE if _OS == "Windows" else {},
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "The operating system rejected the command.").strip()
+        raise RuntimeError(detail[:400])
+    return result
+
+
+def toggle_wifi() -> str:
+    """Toggle Wi-Fi and read the adapter/radio state back before reporting."""
     if _OS == "Darwin":
         iface = _get_macos_wifi_interface()
-        result = subprocess.run(
-            ["networksetup", "-getairportpower", iface],
-            capture_output=True, text=True
+        before = _completed_command(["networksetup", "-getairportpower", iface], timeout=6)
+        is_on = before.stdout.strip().lower().endswith("on")
+        expected = "off" if is_on else "on"
+        _completed_command(["networksetup", "-setairportpower", iface, expected], timeout=10)
+        after = _completed_command(["networksetup", "-getairportpower", iface], timeout=6)
+        actual = "on" if after.stdout.strip().lower().endswith("on") else "off"
+        if actual != expected:
+            raise RuntimeError(f"Wi-Fi state did not change to {expected}. Current response: {after.stdout.strip()}")
+        return f"Wi-Fi is now {actual.upper()}. Verified by networksetup."
+
+    if _OS == "Windows":
+        script = r"""
+$adapter = Get-NetAdapter | Where-Object {$_.PhysicalMediaType -eq 'Native 802.11'} | Select-Object -First 1
+if ($null -eq $adapter) { throw 'No Wi-Fi adapter was found.' }
+if ($adapter.Status -eq 'Up') {
+    Disable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction Stop
+    Start-Sleep -Milliseconds 700
+} else {
+    Enable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction Stop
+    Start-Sleep -Milliseconds 700
+}
+$after = Get-NetAdapter -Name $adapter.Name -ErrorAction Stop
+[pscustomobject]@{ name = $after.Name; status = [string]$after.Status } | ConvertTo-Json -Compress
+"""
+        result = _completed_command([
+            "powershell", "-NoProfile", "-NonInteractive", "-Command", script,
+        ], timeout=15)
+        try:
+            data = json.loads(result.stdout.strip().splitlines()[-1])
+            status = str(data.get("status") or "").strip()
+        except Exception as exc:
+            raise RuntimeError("Windows did not return a readable Wi-Fi adapter state.") from exc
+        if status not in ("Up", "Disabled", "Disconnected"):
+            raise RuntimeError(f"Windows Wi-Fi adapter returned an unexpected state: {status or 'unknown'}.")
+        enabled = status == "Up"
+        return f"Wi-Fi adapter is {status}. Verified by reading the adapter state back."
+
+    before = _completed_command(["nmcli", "-t", "-f", "WIFI", "radio"], timeout=6)
+    current = before.stdout.strip().lower()
+    if current not in ("enabled", "disabled"):
+        raise RuntimeError(f"Could not read Linux Wi-Fi radio state: {current or 'empty response'}.")
+    expected = "disabled" if current == "enabled" else "enabled"
+    _completed_command(["nmcli", "radio", "wifi", expected], timeout=10)
+    after = _completed_command(["nmcli", "-t", "-f", "WIFI", "radio"], timeout=6)
+    actual = after.stdout.strip().lower()
+    if actual != expected:
+        raise RuntimeError(f"Wi-Fi radio did not change to {expected}. Current state: {actual or 'unknown'}.")
+    return f"Wi-Fi is now {actual.upper()}. Verified by nmcli."
+
+
+def _schedule_power_action(action: str) -> str:
+    """Report OS command acceptance, not a claim that shutdown/restart already happened."""
+    if _OS == "Windows":
+        mode = "/r" if action == "restart" else "/s"
+        result = _completed_command(["shutdown", mode, "/t", "10"], timeout=6)
+        detail = result.stdout.strip() or result.stderr.strip()
+        return (
+            f"Windows accepted the {action} request and scheduled it for 10 seconds from now. "
+            "The actual restart/shutdown has not happened yet."
+            + (f" OS response: {detail}" if detail else "")
         )
-        state = "off" if "On" in result.stdout else "on"
-        subprocess.run(["networksetup", "-setairportpower", iface, state],
-            capture_output=True)
-    elif _OS == "Windows":
-        try:
-            subprocess.run(
-                ["powershell", "-Command",
-                 "$adapter = Get-NetAdapter | Where-Object {$_.PhysicalMediaType -eq 'Native 802.11'};"
-                 "if ($adapter.Status -eq 'Up') { Disable-NetAdapter -Name $adapter.Name -Confirm:$false }"
-                 "else { Enable-NetAdapter -Name $adapter.Name -Confirm:$false }"],
-                capture_output=True, timeout=10, **_WIN_HIDE
-            )
-        except Exception as e:
-            print(f"[Settings] toggle_wifi Windows failed: {e}")
-    else:
-        try:
-            result = subprocess.run(["nmcli", "radio", "wifi"], capture_output=True, text=True)
-            state  = "off" if "enabled" in result.stdout else "on"
-            subprocess.run(["nmcli", "radio", "wifi", state], capture_output=True)
-        except Exception as e:
-            print(f"[Settings] toggle_wifi Linux failed: {e}")
+    if _OS == "Darwin":
+        command = (
+            'tell application "System Events" to restart'
+            if action == "restart"
+            else 'tell application "System Events" to shut down'
+        )
+        result = _completed_command(["osascript", "-e", command], timeout=10)
+        detail = result.stdout.strip()
+        return (
+            f"macOS accepted the {action} request. The actual power transition has not been observed yet."
+            + (f" OS response: {detail}" if detail else "")
+        )
+    verb = "reboot" if action == "restart" else "poweroff"
+    result = _completed_command(["systemctl", verb], timeout=10)
+    detail = result.stdout.strip()
+    return (
+        f"systemd accepted the {action} request. The actual power transition has not been observed yet."
+        + (f" OS response: {detail}" if detail else "")
+    )
 
-def restart_computer():
-    if _OS == "Windows":
-        subprocess.run(["shutdown", "/r", "/t", "10"], capture_output=True, **_WIN_HIDE)
-    elif _OS == "Darwin":
-        subprocess.run(["osascript", "-e",
-            'tell application "System Events" to restart'],
-            capture_output=True)
-    else:
-        subprocess.run(["systemctl", "reboot"], capture_output=True)
 
-def shutdown_computer():
-    if _OS == "Windows":
-        subprocess.run(["shutdown", "/s", "/t", "10"], capture_output=True)
-    elif _OS == "Darwin":
-        subprocess.run(["osascript", "-e",
-            'tell application "System Events" to shut down'],
-            capture_output=True)
-    else:
-        subprocess.run(["systemctl", "poweroff"], capture_output=True)
+def restart_computer() -> str:
+    return _schedule_power_action("restart")
+
+
+def shutdown_computer() -> str:
+    return _schedule_power_action("shutdown")
 
 ACTION_MAP: dict[str, callable] = {
     "volume_up":           volume_up,
@@ -895,9 +954,18 @@ def computer_settings(
         if confirm.pending_title():
             return ("There is already a confirmation waiting on screen. "
                     "Ask the user to answer that one first.")
+        def run_confirmed(f=func, a=action):
+            outcome = f()
+            if outcome is None or (isinstance(outcome, str) and not outcome.strip()):
+                return (
+                    f"Confirmation was accepted for '{a}', but the operating system "
+                    "returned no confirmation. The outcome is unverified."
+                )
+            return outcome if isinstance(outcome, str) else str(outcome)
+
         return confirm.request(
             key=action, title=title, detail=detail,
-            run=lambda f=func, a=action: (f(), f"{a} done.")[1],
+            run=run_confirmed,
         )
 
     if action == "volume_set":
