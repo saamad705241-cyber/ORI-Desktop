@@ -90,3 +90,60 @@ def test_lhm_json_supports_decimal_comma_sensor_values():
     reading = parse_lhm_cpu_temperature(payload)
 
     assert reading["temperature_c"] == 46.9
+
+
+def test_windows_acpi_fallback_returns_explicit_provider(monkeypatch):
+    import platform
+    import sys
+    from types import ModuleType, SimpleNamespace
+    from core import hardware_sensors
+
+    fake_wmi = ModuleType("wmi")
+
+    class FakeConnection:
+        def __init__(self, namespace):
+            assert namespace == "root/wmi"
+
+        @staticmethod
+        def MSAcpi_ThermalZoneTemperature():
+            return [
+                SimpleNamespace(
+                    CurrentTemperature=3150,
+                    InstanceName=r"ACPI\\ThermalZone\\TZ00_0",
+                )
+            ]
+
+    fake_wmi.WMI = FakeConnection
+    monkeypatch.setitem(sys.modules, "wmi", fake_wmi)
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+
+    reading = hardware_sensors._read_windows_acpi()
+
+    assert reading == {
+        "temperature_c": 41.9,
+        "sensor": r"ACPI\\ThermalZone\\TZ00_0",
+        "provider": "Windows ACPI thermal zone",
+    }
+
+
+def test_windows_acpi_fallback_rejects_out_of_range_values(monkeypatch):
+    import platform
+    import sys
+    from types import ModuleType, SimpleNamespace
+    from core import hardware_sensors
+
+    fake_wmi = ModuleType("wmi")
+
+    class FakeConnection:
+        def __init__(self, namespace):
+            pass
+
+        @staticmethod
+        def MSAcpi_ThermalZoneTemperature():
+            return [SimpleNamespace(CurrentTemperature=500)]
+
+    fake_wmi.WMI = FakeConnection
+    monkeypatch.setitem(sys.modules, "wmi", fake_wmi)
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+
+    assert hardware_sensors._read_windows_acpi() is None
