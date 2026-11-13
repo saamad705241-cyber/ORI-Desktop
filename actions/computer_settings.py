@@ -303,13 +303,13 @@ def brightness_down():
         except Exception as e:
             print(f"[Settings] Brightness down failed on Windows: {e}")
 
-def close_app():
-    if _OS == "Darwin": pyautogui.hotkey("command", "q")
-    else:               pyautogui.hotkey("alt", "f4")
+def close_app(title: str = ""):
+    from actions.computer_control import _close_window
+    return _close_window(title)
 
-def close_window():
-    if _OS == "Darwin": pyautogui.hotkey("command", "w")
-    else:               pyautogui.hotkey("ctrl", "w")
+def close_window(title: str = ""):
+    from actions.computer_control import _close_window
+    return _close_window(title)
 
 def full_screen():
     if _OS == "Darwin": pyautogui.hotkey("ctrl", "command", "f")
@@ -846,9 +846,6 @@ def computer_settings(
     player=None,
     session_memory=None,
 ) -> str:
-    if not _PYAUTOGUI:
-        return "pyautogui is not installed. Run: pip install pyautogui"
-
     params      = parameters or {}
     raw_action  = params.get("action", "").strip()
     description = params.get("description", "").strip()
@@ -861,6 +858,22 @@ def computer_settings(
             value = detected.get("value")
 
     action = raw_action.lower().strip().replace(" ", "_").replace("-", "_")
+
+    if action in ("close_app", "close_window"):
+        title = str(value or params.get("title") or description or "").strip()
+        if not title:
+            return (
+                "Please specify the application or window title to close. "
+                "No keyboard shortcut was sent."
+            )
+        try:
+            from actions.computer_control import _close_window
+            return _close_window(title)
+        except Exception as exc:
+            return f"Could not safely close '{title}': {type(exc).__name__}: {exc}"
+
+    if not _PYAUTOGUI:
+        return "PyAutoGUI is not installed. This computer action is unavailable."
 
     if not action:
         return _suggest(description or raw_action)
@@ -892,10 +905,20 @@ def computer_settings(
             target = int(value if value is not None else 50)
             before = volume_get()
             volume_set(target)
-            if before is not None:
-                push_undo(f"volume {before}% → {target}%",
+            after = volume_get()
+            if after is None:
+                return (
+                    f"Volume set was requested at {target}%, but the new level could not "
+                    "be read back. The result is unverified."
+                )
+            if abs(after - target) > 3:
+                return (
+                    f"Volume did not reach {target}%. The current verified level is {after}%."
+                )
+            if before is not None and before != after:
+                push_undo(f"volume {before}% → {after}%",
                           lambda b=before: (volume_set(b), f"Back to {b}%.")[1])
-            return f"Volume set to {target}%."
+            return f"Volume set to {after}%. Verified by reading the device level back."
         except Exception as e:
             return f"Could not set volume: {e}"
 
@@ -905,29 +928,35 @@ def computer_settings(
             return "No text provided to type."
         enter_after = str(params.get("press_enter", "false")).lower() in ("true", "1", "yes")
         type_text(text, press_enter_after=enter_after)
-        return f"Typed: {text[:80]}"
+        return (
+            f"Sent text input to the focused control ({min(len(text), 80)} characters shown). "
+            "The field contents were not read back, so the resulting application state is unverified."
+        )
 
     if action == "press_key":
         key = str(value or params.get("key", "")).strip()
         if not key:
             return "No key specified."
         press_key(key)
-        return f"Pressed: {key}"
+        return f"Sent the '{key}' key event. The resulting application state was not verified."
 
     if action in ("reload_n", "refresh_n", "reload_page_n"):
         try:
             reload_page_n(int(value or 1))
-            return f"Reloaded {value or 1} time(s)."
+            return (
+                f"Sent the refresh shortcut {value or 1} time(s). "
+                "The page load result was not verified."
+            )
         except Exception as e:
             return f"Reload failed: {e}"
 
     if action == "scroll_up":
         scroll_up(int(value or 500))
-        return "Scrolled up."
+        return "Scroll-up input was sent; the resulting page position was not verified."
 
     if action == "scroll_down":
         scroll_down(int(value or 500))
-        return "Scrolled down."
+        return "Scroll-down input was sent; the resulting page position was not verified."
 
     func = ACTION_MAP.get(action)
     if not func:
@@ -964,7 +993,20 @@ def computer_settings(
         push_undo("dark mode toggled",
                   lambda: (dark_mode(), "Theme switched back.")[1])
 
-    return f"Done: {action}."
+    if action in ("volume_up", "volume_down"):
+        current = volume_get()
+        if current is None:
+            return f"{action} input was sent, but the current volume could not be read back."
+        return f"Volume is now {current}%. Verified by reading the device level back."
+    if action in ("brightness_up", "brightness_down"):
+        current = brightness_get()
+        if current is None:
+            return f"{action} was requested, but brightness could not be read back."
+        return f"Brightness is now {current}%. Verified by reading the display level back."
+    return (
+        f"Action '{action}' was dispatched, but its resulting state was not read back. "
+        "Do not report it as completed."
+    )
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
@@ -1012,7 +1054,7 @@ TOOL = {
             },
             "value": {
                 "type": "STRING",
-                "description": "Optional value: volume level 0-100, text to type, key name, etc."
+                "description": "Optional value: volume level 0-100, text to type, key name, or the visible application/window title for close_app and close_window."
             }
         },
         "required": []
