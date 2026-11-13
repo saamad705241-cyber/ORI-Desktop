@@ -264,10 +264,13 @@ def _play_youtube(player, source: str, token: int) -> None:
     page = source if _YT.search(source) else _search_page(source)
     opened = ""
     try:
-        webbrowser.open(page)
-        opened = " and it has been opened in the browser instead"
-    except Exception:
-        pass
+        browser_opened = webbrowser.open(page)
+        if browser_opened:
+            opened = " and the browser accepted the fallback page request"
+        else:
+            opened = "; the browser also did not confirm that it opened"
+    except Exception as exc:
+        opened = f"; browser fallback failed ({type(exc).__name__}: {exc})"
     _say(player, "Tell the user, in one short sentence in their own language: "
                  f"'{source}' could not be played on the display "
                  f"({err}){opened}.")
