@@ -2,6 +2,7 @@ import time
 import subprocess
 import platform
 import shutil
+import re
 
 try:
     import psutil
@@ -77,7 +78,62 @@ def _normalize(raw: str) -> str:
 
     return raw  
 
+def _windows_app_visible(app_name: str) -> bool:
+    """Check for a matching process or visible window after requesting launch."""
+    raw = str(app_name or "").strip()
+    if not raw:
+        return False
+    first = raw.split()[0].strip('"')
+    basename = re.split(r"[\\/]", first)[-1]
+    expected = basename.casefold()
+    expected_stem = expected.rsplit(".", 1)[0]
+
+    if _PSUTIL:
+        try:
+            for process in psutil.process_iter(["name", "exe"]):
+                try:
+                    name = str(process.info.get("name") or "").casefold()
+                    exe = str(process.info.get("exe") or "").casefold()
+                    candidates = {
+                        name,
+                        name.rsplit(".", 1)[0],
+                        exe,
+                        re.split(r"[\\/]", exe)[-1],
+                        re.split(r"[\\/]", exe)[-1].rsplit(".", 1)[0],
+                    }
+                    if any(
+                        expected_stem and (candidate == expected_stem or candidate.startswith(expected_stem))
+                        for candidate in candidates
+                    ):
+                        return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+        except Exception:
+            pass
+
+    try:
+        import pygetwindow
+        fragments = {raw.casefold(), expected_stem}
+        for window in pygetwindow.getAllWindows():
+            title = str(getattr(window, "title", "") or "").casefold()
+            if title and any(fragment and fragment in title for fragment in fragments):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _wait_for_windows_app(app_name: str, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + max(0.5, min(float(timeout), 15.0))
+    while time.monotonic() < deadline:
+        if _windows_app_visible(app_name):
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def _launch_windows(app_name: str) -> bool:
+    launch_requested = False
 
     if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
         try:
@@ -87,18 +143,19 @@ def _launch_windows(app_name: str) -> bool:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            time.sleep(1.5)
-            return True
-        except Exception as e:
-            print(f"[open_app] subprocess failed: {e}")
+            launch_requested = True
+        except Exception as exc:
+            print(f"[open_app] subprocess launch failed: {exc}")
 
-    if ":" in app_name:
+    if not launch_requested and ":" in app_name:
         try:
             subprocess.Popen(f"start {app_name}", shell=True)
-            time.sleep(1.0)
-            return True
-        except Exception:
-            pass
+            launch_requested = True
+        except Exception as exc:
+            print(f"[open_app] start protocol launch failed: {exc}")
+
+    if launch_requested:
+        return _wait_for_windows_app(app_name)
 
     try:
         import pyautogui
@@ -108,12 +165,10 @@ def _launch_windows(app_name: str) -> bool:
         pyautogui.write(app_name, interval=0.05)
         time.sleep(0.9)
         pyautogui.press("enter")
-        time.sleep(2.5)
-        return True
-    except Exception as e:
-        print(f"[open_app] Start Menu search failed: {e}")
-
-    return False
+        return _wait_for_windows_app(app_name)
+    except Exception as exc:
+        print(f"[open_app] Start Menu search failed: {exc}")
+        return False
 
 
 def _launch_macos(app_name: str) -> bool:
@@ -260,13 +315,14 @@ def open_app(
 
     try:
         if launcher(normalized):
-            return f"Opened {app_name}."
+            return f"Opened {app_name} and verified that its process or window is present."
         if normalized.lower() != app_name.lower():
             if launcher(app_name):
-                return f"Opened {app_name}."
+                return f"Opened {app_name} and verified that its process or window is present."
         return (
-            f"Could not confirm that {app_name} launched. "
-            f"It may still be loading, or it might not be installed."
+            f"A launch request was sent for {app_name}, but no matching process or window was found. "
+            f"The app may not be installed, may still be loading, or could not be verified. "
+            f"ORI will not claim it opened."
         )
     except Exception as e:
         print(f"[open_app] Error: {e}")
