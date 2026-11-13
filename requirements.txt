@@ -36,6 +36,7 @@ yt-dlp
 # ── Automation / input control ────────────────────────────────────────────────
 pyautogui
 pyperclip
+regex>=2024.11.6,<2027  # Unicode grapheme-safe chunking for Hindi and other scripts
 
 # ── Vision & media ────────────────────────────────────────────────────────────
 pillow>=10,<13
