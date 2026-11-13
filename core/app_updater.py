@@ -34,6 +34,8 @@ def configured_repository() -> str:
             value = str(load_api_keys().get("github_repository", "") or "").strip()
         except Exception:
             value = ""
+    if not value:
+        value = DEFAULT_REPOSITORY
     return value if _REPO_RE.fullmatch(value) else ""
 
 
@@ -202,7 +204,11 @@ def download_latest_update(info: dict[str, Any] | None = None) -> dict[str, Any]
         match = re.search(r"\b([a-fA-F0-9]{64})\b", expected_text)
         if not match:
             raise ValueError("The checksum file does not contain a SHA-256 digest.")
-        digest = hashlib.sha256(installer_path.read_bytes()).hexdigest()
+        hasher = hashlib.sha256()
+        with installer_path.open("rb") as downloaded:
+            for block in iter(lambda: downloaded.read(1024 * 1024), b""):
+                hasher.update(block)
+        digest = hasher.hexdigest()
         if digest.lower() != match.group(1).lower():
             installer_path.unlink(missing_ok=True)
             raise ValueError("Installer SHA-256 verification failed; the file was discarded.")
