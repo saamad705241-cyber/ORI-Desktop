@@ -183,9 +183,15 @@ def video_player(parameters: dict = None, response=None, player=None,
         was_opening = not player.video_is_playing()
         _begin_open()
         player.stop_video()
+        try:
+            still_playing = bool(player.video_is_playing())
+        except Exception:
+            still_playing = True
+        if still_playing:
+            return "Video stop was requested, but the player still reports playback; closure is not confirmed."
         if was_opening:
-            return "Stopped it before it opened."
-        return "Closed the video."
+            return "Pending video open was cancelled and the player reports no active playback."
+        return "Video stop was requested and the player reports no active playback."
 
     # ---- sound ------------------------------------------------------------
     if action in ("mute", "unmute", "sound_on", "sound_off"):
@@ -212,12 +218,12 @@ def video_player(parameters: dict = None, response=None, player=None,
     local = _local_path(source)
     if local:
         player.show_video(local, Path(local).name, muted=True)
-        return f"Playing {Path(local).name} on the display, muted."
+        return f"Video load was requested for {Path(local).name} (muted). Playback has not yet been confirmed."
 
     # A direct media URL can go straight to the player; a YouTube page cannot.
     if _is_url(source) and not _YT.search(source):
         player.show_video(source, source.rsplit("/", 1)[-1][:44], muted=True)
-        return "Playing that on the display, muted."
+        return "Video load was requested for the direct media URL (muted). Playback has not yet been confirmed."
 
     # ANSWER FIRST, OPEN SECOND.
     #
