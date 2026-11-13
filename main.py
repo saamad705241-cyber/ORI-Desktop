@@ -35,6 +35,7 @@ for _stream in ("stdout", "stderr"):
 # ─────────────────────────────────────────────────────────────────────────────
 
 import asyncio
+import os
 import re
 import threading
 import time
