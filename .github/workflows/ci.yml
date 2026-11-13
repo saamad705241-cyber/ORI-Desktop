@@ -25,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pytest ruff
-          python -c "from winrt.windows.devices.geolocation import Geolocator; assert callable(Geolocator.request_access_async)"
+          python -c "from winrt.windows.foundation import Uri; from winrt.windows.devices.geolocation import Geolocator; assert Uri and callable(Geolocator.request_access_async)"
       - name: Validate Windows update helper syntax
         shell: pwsh
         run: |
