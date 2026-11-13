@@ -20,17 +20,22 @@ class SettingsRemoteRedesignTests(unittest.TestCase):
         self.assertNotIn("Browser settings", section)
         self.assertNotIn("Gemini 3.7", section)
 
-    def test_about_uses_one_automatic_check_download_install_action(self):
+    def test_updates_are_explicit_three_stage_actions_and_uninstall_is_present(self):
         source = (ROOT / "ui.py").read_text(encoding="utf-8")
         start = source.index("        # ABOUT & UPDATES")
         end = source.index("    def _select_settings_category(", start)
         section = source[start:end]
-        self.assertIn('button("CHECK & UPDATE", True)', section)
-        self.assertNotIn("CHECK FOR UPDATES", section)
-        self.assertNotIn("DOWNLOAD UPDATE", section)
-        self.assertNotIn("INSTALL & RESTART", section)
-        self.assertIn("def _download_app_update(self, info: dict)", source)
+        self.assertIn('button("CHECK FOR UPDATES", True)', section)
+        self.assertIn('button("DOWNLOAD UPDATE")', section)
+        self.assertIn('button("INSTALL UPDATE")', section)
+        self.assertIn('button("UNINSTALL ORI")', section)
+        self.assertIn("Your API key, preferences and ORI memory are kept", section)
+        check_method = source.split("    def _apply_app_update_check(", 1)[1].split(
+            "    def _download_checked_update(", 1
+        )[0]
+        self.assertNotIn("_download_app_update(data)", check_method)
         self.assertIn("schedule_windows_update", source)
+        self.assertIn("schedule_uninstall", source)
 
     def test_onboarding_marks_google_and_email_auth_as_coming_soon(self):
         source = (ROOT / "ui.py").read_text(encoding="utf-8")
