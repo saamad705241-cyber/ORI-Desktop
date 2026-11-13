@@ -71,3 +71,44 @@ def test_blind_messaging_does_not_claim_delivery(monkeypatch):
 
     assert "delivery were not verified" in result.lower()
     assert "do not say the message was sent" in result.lower()
+
+
+
+def test_computer_settings_close_app_uses_verified_window_close(monkeypatch):
+    import sys
+    from types import ModuleType, SimpleNamespace
+    from actions import computer_settings, computer_control
+
+    fake_window = SimpleNamespace(title="Untitled - Notepad")
+    fake_pygetwindow = ModuleType("pygetwindow")
+    fake_pygetwindow.getActiveWindow = lambda: fake_window
+    monkeypatch.setitem(sys.modules, "pygetwindow", fake_pygetwindow)
+    monkeypatch.setattr(computer_settings, "_OS", "Windows")
+    monkeypatch.setattr(
+        computer_control,
+        "_close_window",
+        lambda title: f"Closed '{title}' and verified the process has no visible windows.",
+    )
+
+    result = computer_settings.close_app()
+
+    assert "verified" in result.lower()
+    assert "notepad" in result.lower()
+
+
+def test_computer_settings_close_window_shortcut_is_not_a_verified_close(monkeypatch):
+    from actions import computer_settings
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(computer_settings, "_PYAUTOGUI", True)
+    monkeypatch.setattr(computer_settings, "_OS", "Windows")
+    monkeypatch.setattr(
+        computer_settings,
+        "pyautogui",
+        SimpleNamespace(hotkey=lambda *_keys: None),
+        raising=False,
+    )
+
+    result = computer_settings.computer_settings({"action": "close_window"})
+
+    assert "unverified" in result.lower()
