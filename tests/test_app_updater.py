@@ -49,6 +49,12 @@ def test_repository_config_requires_owner_and_repo(monkeypatch):
     assert updater.configured_repository() == "samad/ori"
 
 
+def test_repository_defaults_to_official_ori_repository(monkeypatch):
+    monkeypatch.delenv("ORI_GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr("memory.config_manager.load_api_keys", lambda: {"github_repository": ""})
+    assert updater.configured_repository() == "saamad705241-cyber/ORI-Desktop"
+
+
 def test_update_check_only_reads_release_metadata_and_finds_setup_checksum(monkeypatch):
     calls = []
     response = FakeResponse(payload=_release_payload())
