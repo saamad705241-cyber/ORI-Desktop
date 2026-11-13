@@ -136,19 +136,11 @@ def _search_in_app(query: str) -> None:
     time.sleep(1.0)
 
 def _desktop_send(app_name: str, receiver: str, message: str) -> str:
-    if not _open_app(app_name):
-        return f"Could not open {app_name}."
-
-    time.sleep(1.0)
-    _search_in_app(receiver)
-    pyautogui.press("enter")
-    time.sleep(0.8)
-
-    _paste_text(message)
-    time.sleep(0.2)
-    pyautogui.press("enter")
-    time.sleep(0.3)
-    return f"Message sent to {receiver} via {app_name}."
+    """Refuse blind keystroke messaging when no verified transport exists."""
+    return (
+        f"No verified message-delivery adapter is available for {app_name}. "
+        f"No message was sent to {receiver}."
+    )
 
 def _send_whatsapp(receiver: str, message: str) -> str:
     """WhatsApp goes through the verified driver when there is one.
@@ -175,18 +167,21 @@ def _send_whatsapp(receiver: str, message: str) -> str:
     try:
         from plugins import _whatsapp_core as wa
     except Exception as e:
-        print(f"[SendMessage] WhatsApp driver unavailable ({e}) — typing blind.")
-        return _desktop_send("WhatsApp", receiver, message)
+        return (
+            f"Verified WhatsApp delivery is unavailable ({type(e).__name__}). "
+            f"No message was sent to {receiver}."
+        )
 
     try:
         transport, why = wa.get()
     except Exception as e:
-        print(f"[SendMessage] WhatsApp driver failed to start ({e}) — typing blind.")
-        return _desktop_send("WhatsApp", receiver, message)
+        return (
+            f"The verified WhatsApp driver failed to start ({type(e).__name__}: {e}). "
+            f"No message was sent to {receiver}."
+        )
 
     if transport is None:
-        print(f"[SendMessage] {why} — typing blind.")
-        return _desktop_send("WhatsApp", receiver, message)
+        return f"WhatsApp could not be verified ({why}). No message was sent to {receiver}."
 
     sent, failure = transport.send_message_to(receiver, message)
     if sent:
@@ -207,53 +202,16 @@ def _send_discord(receiver: str, message: str) -> str:
 
 
 def _send_instagram(receiver: str, message: str) -> str:
-    _require_pyautogui()
-
-    if not _open_browser_url("https://www.instagram.com/direct/new/"):
-        return "Could not open Instagram in browser."
-
-    _paste_text(receiver)
-    time.sleep(1.5)
-
-    pyautogui.press("down")
-    time.sleep(0.3)
-    pyautogui.press("enter")   
-    time.sleep(0.4)
-
-    for _ in range(4):
-        pyautogui.press("tab")
-        time.sleep(0.15)
-    pyautogui.press("enter")
-    time.sleep(2.0)
-
-    _paste_text(message)
-    time.sleep(0.2)
-    pyautogui.press("enter")
-    time.sleep(0.3)
-
-    return f"Message sent to {receiver} via Instagram."
-
+    return (
+        "Instagram does not have a verified delivery adapter in this build. "
+        f"No message was sent to {receiver}."
+    )
 
 def _send_messenger(receiver: str, message: str) -> str:
-    _require_pyautogui()
-
-    if not _open_browser_url("https://www.messenger.com/"):
-        return "Could not open Messenger in browser."
-
-
-    _search_in_app(receiver)
-    time.sleep(0.5)
-    pyautogui.press("down")
-    time.sleep(0.3)
-    pyautogui.press("enter")
-    time.sleep(1.0)
-
-    _paste_text(message)
-    time.sleep(0.2)
-    pyautogui.press("enter")
-    time.sleep(0.3)
-
-    return f"Message sent to {receiver} via Messenger."
+    return (
+        "Messenger does not have a verified delivery adapter in this build. "
+        f"No message was sent to {receiver}."
+    )
 
 _PLATFORM_MAP = [
     ({"whatsapp", "wp", "wapp"},              _send_whatsapp),
@@ -288,9 +246,6 @@ def send_message(
         return "Please specify a recipient."
     if not message_text:
         return "Please specify the message content."
-    if not _PYAUTOGUI:
-        return "PyAutoGUI is not installed — cannot control the desktop."
-
     preview = message_text[:50] + ("…" if len(message_text) > 50 else "")
     print(f"[SendMessage] 📨 {platform} → {receiver}: {preview}")
     if player:
@@ -317,11 +272,11 @@ def send_message(
 TOOL = {
     "name": "send_message",
     "description": (
-        "Sends a text message via WhatsApp, Telegram, or another messaging "
-        "platform. Write 'message_text' in the USER'S OWN LANGUAGE, exactly "
-        "what they asked to be said. If the result says the message was NOT "
-        "sent, repeat that plainly along with the reason it gives — never "
-        "tell the user a message was sent unless the result said it was."
+        "Sends a message only through a verified delivery adapter. WhatsApp uses "
+        "the verified transport; other platforms without a verified adapter are "
+        "reported unavailable and no blind keyboard fallback is attempted. Write "
+        "'message_text' in the USER'S OWN LANGUAGE. Never report delivery unless "
+        "the adapter confirms it."
     ),
     "parameters": {
         "type": "OBJECT",
