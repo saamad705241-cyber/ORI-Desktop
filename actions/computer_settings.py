@@ -604,12 +604,13 @@ def dark_mode():
 
 def _completed_command(command: list[str], *, timeout: float = 12.0) -> subprocess.CompletedProcess:
     """Run a system command and reject non-zero exit codes."""
+    run_options = dict(_WIN_HIDE) if _OS == "Windows" else {}
     result = subprocess.run(
         command,
         capture_output=True,
         text=True,
         timeout=timeout,
-        **_WIN_HIDE if _OS == "Windows" else {},
+        **run_options,
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "The operating system rejected the command.").strip()
@@ -635,35 +636,37 @@ def toggle_wifi() -> str:
         script = r"""
 $adapter = Get-NetAdapter | Where-Object {$_.PhysicalMediaType -eq 'Native 802.11'} | Select-Object -First 1
 if ($null -eq $adapter) { throw 'No Wi-Fi adapter was found.' }
-if ($adapter.Status -eq 'Up') {
+$expected = if ([string]$adapter.AdminStatus -eq 'Up') { 'Down' } else { 'Up' }
+if ($expected -eq 'Down') {
     Disable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction Stop
-    Start-Sleep -Milliseconds 700
 } else {
     Enable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction Stop
-    Start-Sleep -Milliseconds 700
 }
+Start-Sleep -Milliseconds 900
 $after = Get-NetAdapter -Name $adapter.Name -ErrorAction Stop
-[pscustomobject]@{ name = $after.Name; status = [string]$after.Status } | ConvertTo-Json -Compress
+$actual = [string]$after.AdminStatus
+if ($actual -ne $expected) { throw "Wi-Fi AdminStatus is $actual; expected $expected." }
+[pscustomobject]@{ name = $after.Name; admin_status = $actual } | ConvertTo-Json -Compress
 """
         result = _completed_command([
             "powershell", "-NoProfile", "-NonInteractive", "-Command", script,
         ], timeout=15)
         try:
             data = json.loads(result.stdout.strip().splitlines()[-1])
-            status = str(data.get("status") or "").strip()
+            status = str(data.get("admin_status") or "").strip()
         except Exception as exc:
             raise RuntimeError("Windows did not return a readable Wi-Fi adapter state.") from exc
-        if status not in ("Up", "Disabled", "Disconnected"):
-            raise RuntimeError(f"Windows Wi-Fi adapter returned an unexpected state: {status or 'unknown'}.")
-        enabled = status == "Up"
-        return f"Wi-Fi adapter is {status}. Verified by reading the adapter state back."
+        if status not in ("Up", "Down"):
+            raise RuntimeError(f"Windows Wi-Fi adapter returned an unexpected administrative state: {status or 'unknown'}.")
+        return f"Wi-Fi adapter administrative state is {status}. Verified by reading it back."
 
     before = _completed_command(["nmcli", "-t", "-f", "WIFI", "radio"], timeout=6)
     current = before.stdout.strip().lower()
     if current not in ("enabled", "disabled"):
         raise RuntimeError(f"Could not read Linux Wi-Fi radio state: {current or 'empty response'}.")
     expected = "disabled" if current == "enabled" else "enabled"
-    _completed_command(["nmcli", "radio", "wifi", expected], timeout=10)
+    command_state = "off" if expected == "disabled" else "on"
+    _completed_command(["nmcli", "radio", "wifi", command_state], timeout=10)
     after = _completed_command(["nmcli", "-t", "-f", "WIFI", "radio"], timeout=6)
     actual = after.stdout.strip().lower()
     if actual != expected:
