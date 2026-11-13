@@ -11,13 +11,13 @@ normal users cannot edit it through Settings.
 # ---------------------------------------------------------------------------
 
 APP_NAME = "ORI"
-APP_VERSION = "3.5.4"
+APP_VERSION = "3.6.0"
 APP_RELEASE_LABEL = f"ORI {APP_VERSION}"
 APP_MODEL_LABEL = f"ORI Core {'.'.join(APP_VERSION.split('.')[:2])}"  # Product/runtime identity, not a foundation-model claim.
 BUILD_DATE = "14 November 2026"
 RELEASE_DATE = BUILD_DATE
 PLANNED_FINAL_RELEASE = "November 2026"
-RELEASE_STATUS = "Final integration candidate; Windows, microphone and live-service verification required before public release"
+RELEASE_STATUS = "Windows installer and staged updater candidate; clean-machine installation and real-device verification required before public release"
 
 # ORI acronym — official and canonical
 ORI_ACRONYM = {
@@ -118,7 +118,7 @@ Settings are grouped into small, collapsed sections and contain only user-facing
   the operating system exposes them. Temperature remains optional and unavailable sensors show N/A.
 - System & Weather: weather is optional and only enabled on explicit user request.
 - Phone Remote: QR pairing and the local phone dashboard. Pair trusted devices on the same LAN.
-- About & Updates: current version, candidate/release state, and the verified Windows update flow.
+- About & Updates: current version, candidate/release state, separate Check/Download/Install actions, and Windows uninstall guidance.
 - Terms: collapsed until opened.
 No Firebase Web API, sign-in management, browser settings, privacy dashboard or diagnostic-copy
 controls are presented in ordinary user Settings.
