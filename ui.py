@@ -4547,7 +4547,16 @@ class MainWindow(QMainWindow):
 
         # VOICE & AUDIO ------------------------------------------------------
         p1, l1 = page_layout()
-        audio = panel(l1, "AUDIO DEVICES", "Choose which microphone and speakers ORI uses. System default is recommended.")
+        voice_columns = QHBoxLayout()
+        voice_columns.setSpacing(12)
+        l1.addLayout(voice_columns)
+        audio_column = QVBoxLayout()
+        voice_column = QVBoxLayout()
+        audio_column.setSpacing(10)
+        voice_column.setSpacing(10)
+        voice_columns.addLayout(audio_column, 1)
+        voice_columns.addLayout(voice_column, 1)
+        audio = panel(audio_column, "AUDIO DEVICES", "Choose which microphone and speakers ORI uses. System default is recommended.")
         from memory.config_manager import (get_input_device, get_output_device, get_wake_word_enabled,
                                            get_push_to_talk_enabled, get_brief_enabled,
                                            get_voice_interrupt_enabled)
@@ -4575,7 +4584,7 @@ class MainWindow(QMainWindow):
         self._audio_status.setFont(QFont(UI_FONT, 8)); self._audio_status.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         audio.addWidget(self._audio_status)
 
-        voice = panel(l1, "VOICE BEHAVIOUR", "Optional voice shortcuts. The main screen stays clean; these controls do not add feature buttons to the HUD.")
+        voice = panel(voice_column, "VOICE BEHAVIOUR", "Optional voice shortcuts. The main screen stays clean; these controls do not add feature buttons to the HUD.")
         self._settings_wake = QPushButton("WAKE WORD: ON" if get_wake_word_enabled() else "WAKE WORD: OFF")
         self._settings_wake.setCheckable(True); self._settings_wake.setChecked(bool(get_wake_word_enabled()))
         self._settings_wake.toggled.connect(self._on_settings_wake_toggled)
@@ -4602,8 +4611,29 @@ class MainWindow(QMainWindow):
             toggle.setStyleSheet(f"QPushButton {{ color: {C.TEXT_MED}; background: rgba(3,14,7,150); border: 1px solid {C.BORDER}; padding: 0 10px; }} QPushButton:checked {{ color: {C.PRI}; border-color: {C.PRI_DIM}; background: {C.PRI_GHO}; }}")
             toggle_row.addWidget(toggle, 1)
         voice.addLayout(toggle_row)
-        voice.addStretch(1)
+        voice_column.addStretch(1)
+        audio_column.addStretch(1)
         self._settings_stack.addWidget(p1)
+
+        # APPEARANCE ---------------------------------------------------------
+        p2, l2 = page_layout()
+        appearance = panel(l2, "TERMINAL APPEARANCE", "ORI keeps its dark grid and terminal layout. Only the signal accent changes here.")
+        self._settings_accent = self._settings_combo()
+        for label, hexv in (("PHOSPHOR GREEN", "#43ff91"), ("AMBER TERMINAL", "#ffc35a"), ("ICE GREEN", "#b6ffd0")):
+            self._settings_accent.addItem(label, hexv)
+        old_accent = str(cfg.get("ui_color") or "#43ff91").lower()
+        accent_idx = self._settings_accent.findData(old_accent)
+        self._settings_accent.setCurrentIndex(accent_idx if accent_idx >= 0 else 0)
+        row(appearance, "Signal accent", self._settings_accent)
+        apply_theme = button("APPLY ACCENT", True)
+        self._save_theme_btn = apply_theme
+        apply_theme.clicked.connect(self._save_theme_settings)
+        appearance.addWidget(apply_theme, alignment=Qt.AlignmentFlag.AlignLeft)
+        note = QLabel("The idle signal has a subtle ambient motion. Live microphone and speaker audio drive the actual spectrum.")
+        note.setWordWrap(True); note.setFont(QFont(UI_FONT, 8)); note.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        appearance.addWidget(note)
+        appearance.addStretch(1)
+        self._settings_stack.addWidget(p2)
 
         # APPEARANCE ---------------------------------------------------------
         p2, l2 = page_layout()
@@ -4627,7 +4657,16 @@ class MainWindow(QMainWindow):
 
         # SYSTEM -------------------------------------------------------------
         p3, l3 = page_layout()
-        system = panel(l3, "SYSTEM DISPLAY", "Choose whether CPU and memory show values, mini graphs or both in the top bar.")
+        system_columns = QHBoxLayout()
+        system_columns.setSpacing(12)
+        l3.addLayout(system_columns)
+        metrics_column = QVBoxLayout()
+        location_column = QVBoxLayout()
+        metrics_column.setSpacing(10)
+        location_column.setSpacing(10)
+        system_columns.addLayout(metrics_column, 1)
+        system_columns.addLayout(location_column, 1)
+        system = panel(metrics_column, "SYSTEM DISPLAY", "Choose whether CPU and memory show values, mini graphs or both in the top bar.")
         self._settings_metrics_combo = self._settings_combo()
         metric_mode = str(cfg.get("metrics_display_mode") or "both").lower()
         for label, value in (("Percentages only", "percentages"), ("Mini graphs only", "graphs"), ("Percentages + graphs", "both")):
@@ -4648,7 +4687,7 @@ class MainWindow(QMainWindow):
         self._refresh_temperature_sensor_status()
 
         location = panel(
-            l3,
+            location_column,
             "LOCATION & WEATHER",
             "Allow Windows device location to show your area and current weather. Coordinates are shared with OpenStreetMap and Open-Meteo only after your consent.",
         )
@@ -4681,7 +4720,8 @@ class MainWindow(QMainWindow):
             "Windows permission can also be revoked in Windows Location Privacy."
         ))
         location.addStretch(1)
-        system.addStretch(1)
+        metrics_column.addStretch(1)
+        location_column.addStretch(1)
         self._settings_stack.addWidget(p3)
 
         # PHONE REMOTE -------------------------------------------------------
@@ -4707,7 +4747,21 @@ class MainWindow(QMainWindow):
 
         # ABOUT & UPDATES ----------------------------------------------------
         p5, l5 = page_layout()
-        about = panel(l5, "ABOUT ORI", "Product information, creator profile and verified software updates.")
+        about_columns = QHBoxLayout()
+        about_columns.setSpacing(12)
+        l5.addLayout(about_columns)
+        about_info_column = QVBoxLayout()
+        about_actions_column = QVBoxLayout()
+        about_info_column.setSpacing(10)
+        about_actions_column.setSpacing(10)
+        about_columns.addLayout(about_info_column, 7)
+        about_columns.addLayout(about_actions_column, 4)
+
+        about_info = panel(
+            about_info_column,
+            "ABOUT ORI",
+            "Product identity, release state, architecture and the current feature list.",
+        )
         from ori_metadata import (
             ABOUT_TEXT as _ORI_ABOUT_TEXT,
             TERMS_TEXT as _ORI_TERMS_TEXT,
@@ -4719,8 +4773,7 @@ class MainWindow(QMainWindow):
         about_text.setPlainText(_ORI_ABOUT_TEXT)
         about_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         about_text.setFont(QFont(UI_FONT, 8))
-        about_text.setMinimumHeight(190)
-        about_text.setMaximumHeight(260)
+        about_text.setMinimumHeight(240)
         about_text.setStyleSheet(f"""
             QTextEdit {{ color: {C.TEXT_MED}; background: rgba(0,0,0,70);
                 border: 1px solid {C.BORDER}; border-radius: 2px; padding: 8px; }}
@@ -4728,9 +4781,13 @@ class MainWindow(QMainWindow):
             QScrollBar::handle:vertical {{ background: {C.BORDER_B}; min-height: 22px; border-radius: 3px; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
         """)
-        about.addWidget(about_text, 1)
+        about_info.addWidget(about_text, 1)
 
-        social_row = QHBoxLayout()
+        about_actions = panel(
+            about_actions_column,
+            "CREATOR & SOFTWARE UPDATES",
+            "Official project profile, verified releases and update controls.",
+        )
         self._instagram_btn = button("INSTAGRAM PROFILE ↗")
         _instagram_icon = CONFIG_DIR / "instagram.svg"
         if _instagram_icon.exists():
@@ -4738,31 +4795,30 @@ class MainWindow(QMainWindow):
         self._instagram_btn.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(_ORI_INSTAGRAM_URL))
         )
-        social_row.addWidget(self._instagram_btn)
-        social_row.addStretch(1)
-        about.addLayout(social_row)
+        about_actions.addWidget(self._instagram_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
         update_note = QLabel(
-            "SOFTWARE UPDATES · Check for a new ORI release. Downloads are verified before installation."
+            "SOFTWARE UPDATES · Check the official ORI release. Packages are SHA-256 verified before installation."
         )
         update_note.setWordWrap(True)
         update_note.setFont(QFont(UI_FONT, 8))
         update_note.setStyleSheet(f"color: {C.ACC}; background: transparent;")
-        about.addWidget(update_note)
+        about_actions.addWidget(update_note)
         self._app_update_status_lbl = QLabel("Update check has not been run.")
         self._app_update_status_lbl.setWordWrap(True)
         self._app_update_status_lbl.setFont(QFont(UI_FONT, 8))
         self._app_update_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
-        about.addWidget(self._app_update_status_lbl)
+        about_actions.addWidget(self._app_update_status_lbl)
         self._update_app_btn = button("CHECK & INSTALL UPDATE", True)
         self._update_app_btn.setMinimumWidth(210)
         self._update_app_btn.clicked.connect(self._check_app_updates)
-        about.addWidget(self._update_app_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        about_actions.addWidget(self._update_app_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
         terms_button = button("TERMS & CONDITIONS")
         terms_button.clicked.connect(lambda: self._show_terms_dialog(_ORI_TERMS_TEXT))
-        about.addWidget(terms_button, alignment=Qt.AlignmentFlag.AlignLeft)
-        about.addStretch(1)
+        about_actions.addWidget(terms_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        about_actions_column.addStretch(1)
+        about_info_column.addStretch(1)
         self._settings_stack.addWidget(p5)
 
         root.addWidget(self._settings_stack, 1)
