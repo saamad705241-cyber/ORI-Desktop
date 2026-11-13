@@ -34,3 +34,11 @@ def test_send_message_does_not_require_pyautogui_for_verified_adapter(monkeypatc
     })
 
     assert result == "Message sent via verified transport."
+
+
+def test_whatsapp_missing_verified_driver_never_falls_back_to_keyboard(monkeypatch):
+    monkeypatch.setattr(send_message, "_PYAUTOGUI", True)
+    result = send_message._send_whatsapp("Alex", "Hello")
+
+    assert "Verified WhatsApp delivery is unavailable" in result
+    assert "No message was sent" in result
