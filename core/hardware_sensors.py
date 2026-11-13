@@ -178,6 +178,43 @@ def _read_legacy_wmi() -> dict[str, Any] | None:
     return None
 
 
+def _read_windows_acpi() -> dict[str, Any] | None:
+    """Compatibility fallback for Windows ACPI thermal-zone sensors.
+
+    ACPI thermal zones are not guaranteed to represent the CPU package, so
+    the provider is labelled explicitly rather than presented as a CPU diode.
+    """
+    try:
+        import platform
+        if platform.system() != "Windows":
+            return None
+        import wmi  # type: ignore
+        zones = wmi.WMI(namespace="root/wmi").MSAcpi_ThermalZoneTemperature()
+    except Exception:
+        return None
+
+    candidates: list[tuple[float, str]] = []
+    for zone in zones or []:
+        try:
+            raw = float(getattr(zone, "CurrentTemperature", 0))
+            value = round((raw / 10.0) - 273.15, 1)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not 0.0 < value < 125.0:
+            continue
+        instance = str(getattr(zone, "InstanceName", "") or "").strip()
+        candidates.append((value, instance or "ACPI thermal zone"))
+
+    if not candidates:
+        return None
+    value, sensor = max(candidates, key=lambda item: item[0])
+    return {
+        "temperature_c": value,
+        "sensor": sensor,
+        "provider": "Windows ACPI thermal zone",
+    }
+
+
 def _read_psutil() -> dict[str, Any] | None:
     try:
         import psutil
@@ -204,4 +241,4 @@ def _read_psutil() -> dict[str, Any] | None:
 
 def get_cpu_temperature() -> dict[str, Any] | None:
     """Return a verified CPU thermal reading, or None when no CPU sensor exists."""
-    return _read_lhm_http() or _read_legacy_wmi() or _read_psutil()
+    return _read_lhm_http() or _read_legacy_wmi() or _read_windows_acpi() or _read_psutil()

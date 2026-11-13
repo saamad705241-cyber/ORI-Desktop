@@ -1251,7 +1251,7 @@ class JarvisLive:
             active.add("files")
         if lowered == "computer_control":
             action = str(args.get("action", "")).lower()
-            if action in {"type", "smart_type", "hotkey", "press", "clear_field", "paste"}:
+            if action in {"type", "smart_type", "hotkey", "press", "clear_field", "paste", "close_window"}:
                 active.add("keyboard")
             if action in {"click", "left_click", "double_click", "right_click", "move", "drag", "scroll", "screen_click"}:
                 active.add("mouse")
@@ -1305,7 +1305,7 @@ class JarvisLive:
             )
 
         loop   = asyncio.get_event_loop()
-        result = "Done."
+        result = "Tool did not return a confirmation; outcome is unverified."
 
         try:
             if name == "recall_memory":
@@ -1412,6 +1412,7 @@ class JarvisLive:
                     import os as _os
                     _os._exit(0)
                 asyncio.create_task(_do_shutdown())
+                result = "Shutdown was scheduled; ORI will close after the goodbye sequence."
 
             elif self._action_registry.has(name):
                 # file_processor: fall back to the currently-uploaded file when none is given
@@ -1420,7 +1421,7 @@ class JarvisLive:
                 _ctx = {"player": self.ui, "speak": self.speak,
                         "response": None, "session_memory": None}
                 r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
-                result = r or "Done."
+                result = r
                 # web_search: mirror results to the on-screen content panel
                 if (name == "web_search" and r
                         and not r.startswith("No results")
@@ -1436,7 +1437,7 @@ class JarvisLive:
                         None,
                         lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
                     )
-                    result = r or "Done."
+                    result = r if r else "Plugin returned no confirmation; outcome is unverified. Do not report success."
                 else:
                     result = f"Unknown tool: {name}"
 

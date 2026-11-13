@@ -46,6 +46,8 @@ python -m PyInstaller --noconfirm --clean --onedir --windowed `
   --collect-all win32com `
   --collect-all pynvml `
   --collect-all winrt.windows.devices.geolocation `
+  --collect-all winrt.windows.foundation `
+  --collect-all winrt.windows.foundation.collections `
   --hidden-import winrt.system `
   --collect-submodules actions `
   --collect-submodules core `

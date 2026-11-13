@@ -356,6 +356,7 @@ class _SysMetrics:
                 "net": self.net,
                 "gpu": self.gpu,
                 "tmp": self.tmp,
+                "tmp_provider": getattr(self, "_cpu_temp_provider", None),
             }
 
 
@@ -4546,7 +4547,16 @@ class MainWindow(QMainWindow):
 
         # VOICE & AUDIO ------------------------------------------------------
         p1, l1 = page_layout()
-        audio = panel(l1, "AUDIO DEVICES", "Choose which microphone and speakers ORI uses. System default is recommended.")
+        voice_columns = QHBoxLayout()
+        voice_columns.setSpacing(12)
+        l1.addLayout(voice_columns)
+        audio_column = QVBoxLayout()
+        voice_column = QVBoxLayout()
+        audio_column.setSpacing(10)
+        voice_column.setSpacing(10)
+        voice_columns.addLayout(audio_column, 1)
+        voice_columns.addLayout(voice_column, 1)
+        audio = panel(audio_column, "AUDIO DEVICES", "Choose which microphone and speakers ORI uses. System default is recommended.")
         from memory.config_manager import (get_input_device, get_output_device, get_wake_word_enabled,
                                            get_push_to_talk_enabled, get_brief_enabled,
                                            get_voice_interrupt_enabled)
@@ -4574,7 +4584,7 @@ class MainWindow(QMainWindow):
         self._audio_status.setFont(QFont(UI_FONT, 8)); self._audio_status.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         audio.addWidget(self._audio_status)
 
-        voice = panel(l1, "VOICE BEHAVIOUR", "Optional voice shortcuts. The main screen stays clean; these controls do not add feature buttons to the HUD.")
+        voice = panel(voice_column, "VOICE BEHAVIOUR", "Optional voice shortcuts. The main screen stays clean; these controls do not add feature buttons to the HUD.")
         self._settings_wake = QPushButton("WAKE WORD: ON" if get_wake_word_enabled() else "WAKE WORD: OFF")
         self._settings_wake.setCheckable(True); self._settings_wake.setChecked(bool(get_wake_word_enabled()))
         self._settings_wake.toggled.connect(self._on_settings_wake_toggled)
@@ -4601,8 +4611,29 @@ class MainWindow(QMainWindow):
             toggle.setStyleSheet(f"QPushButton {{ color: {C.TEXT_MED}; background: rgba(3,14,7,150); border: 1px solid {C.BORDER}; padding: 0 10px; }} QPushButton:checked {{ color: {C.PRI}; border-color: {C.PRI_DIM}; background: {C.PRI_GHO}; }}")
             toggle_row.addWidget(toggle, 1)
         voice.addLayout(toggle_row)
-        voice.addStretch(1)
+        voice_column.addStretch(1)
+        audio_column.addStretch(1)
         self._settings_stack.addWidget(p1)
+
+        # APPEARANCE ---------------------------------------------------------
+        p2, l2 = page_layout()
+        appearance = panel(l2, "TERMINAL APPEARANCE", "ORI keeps its dark grid and terminal layout. Only the signal accent changes here.")
+        self._settings_accent = self._settings_combo()
+        for label, hexv in (("PHOSPHOR GREEN", "#43ff91"), ("AMBER TERMINAL", "#ffc35a"), ("ICE GREEN", "#b6ffd0")):
+            self._settings_accent.addItem(label, hexv)
+        old_accent = str(cfg.get("ui_color") or "#43ff91").lower()
+        accent_idx = self._settings_accent.findData(old_accent)
+        self._settings_accent.setCurrentIndex(accent_idx if accent_idx >= 0 else 0)
+        row(appearance, "Signal accent", self._settings_accent)
+        apply_theme = button("APPLY ACCENT", True)
+        self._save_theme_btn = apply_theme
+        apply_theme.clicked.connect(self._save_theme_settings)
+        appearance.addWidget(apply_theme, alignment=Qt.AlignmentFlag.AlignLeft)
+        note = QLabel("The idle signal has a subtle ambient motion. Live microphone and speaker audio drive the actual spectrum.")
+        note.setWordWrap(True); note.setFont(QFont(UI_FONT, 8)); note.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        appearance.addWidget(note)
+        appearance.addStretch(1)
+        self._settings_stack.addWidget(p2)
 
         # APPEARANCE ---------------------------------------------------------
         p2, l2 = page_layout()
@@ -4626,7 +4657,16 @@ class MainWindow(QMainWindow):
 
         # SYSTEM -------------------------------------------------------------
         p3, l3 = page_layout()
-        system = panel(l3, "SYSTEM DISPLAY", "Choose whether CPU and memory show values, mini graphs or both in the top bar.")
+        system_columns = QHBoxLayout()
+        system_columns.setSpacing(12)
+        l3.addLayout(system_columns)
+        metrics_column = QVBoxLayout()
+        location_column = QVBoxLayout()
+        metrics_column.setSpacing(10)
+        location_column.setSpacing(10)
+        system_columns.addLayout(metrics_column, 1)
+        system_columns.addLayout(location_column, 1)
+        system = panel(metrics_column, "SYSTEM DISPLAY", "Choose whether CPU and memory show values, mini graphs or both in the top bar.")
         self._settings_metrics_combo = self._settings_combo()
         metric_mode = str(cfg.get("metrics_display_mode") or "both").lower()
         for label, value in (("Percentages only", "percentages"), ("Mini graphs only", "graphs"), ("Percentages + graphs", "both")):
@@ -4647,7 +4687,7 @@ class MainWindow(QMainWindow):
         self._refresh_temperature_sensor_status()
 
         location = panel(
-            l3,
+            location_column,
             "LOCATION & WEATHER",
             "Allow Windows device location to show your area and current weather. Coordinates are shared with OpenStreetMap and Open-Meteo only after your consent.",
         )
@@ -4680,7 +4720,8 @@ class MainWindow(QMainWindow):
             "Windows permission can also be revoked in Windows Location Privacy."
         ))
         location.addStretch(1)
-        system.addStretch(1)
+        metrics_column.addStretch(1)
+        location_column.addStretch(1)
         self._settings_stack.addWidget(p3)
 
         # PHONE REMOTE -------------------------------------------------------
@@ -4706,19 +4747,47 @@ class MainWindow(QMainWindow):
 
         # ABOUT & UPDATES ----------------------------------------------------
         p5, l5 = page_layout()
-        about = panel(l5, "ABOUT ORI", "Product information, creator profile and verified software updates.")
+        about_columns = QHBoxLayout()
+        about_columns.setSpacing(12)
+        l5.addLayout(about_columns)
+        about_info_column = QVBoxLayout()
+        about_actions_column = QVBoxLayout()
+        about_info_column.setSpacing(10)
+        about_actions_column.setSpacing(10)
+        about_columns.addLayout(about_info_column, 7)
+        about_columns.addLayout(about_actions_column, 4)
+
+        about_info = panel(
+            about_info_column,
+            "ABOUT ORI",
+            "Product identity, release state, architecture and the current feature list.",
+        )
         from ori_metadata import (
             ABOUT_TEXT as _ORI_ABOUT_TEXT,
             TERMS_TEXT as _ORI_TERMS_TEXT,
             INSTAGRAM_URL as _ORI_INSTAGRAM_URL,
         )
-        about_text = QLabel(_ORI_ABOUT_TEXT)
-        about_text.setWordWrap(True)
+        about_text = QTextEdit()
+        about_text.setReadOnly(True)
+        about_text.setAcceptRichText(False)
+        about_text.setPlainText(_ORI_ABOUT_TEXT)
+        about_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         about_text.setFont(QFont(UI_FONT, 8))
-        about_text.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
-        about.addWidget(about_text)
+        about_text.setMinimumHeight(240)
+        about_text.setStyleSheet(f"""
+            QTextEdit {{ color: {C.TEXT_MED}; background: rgba(0,0,0,70);
+                border: 1px solid {C.BORDER}; border-radius: 2px; padding: 8px; }}
+            QScrollBar:vertical {{ width: 7px; background: transparent; margin: 2px; }}
+            QScrollBar::handle:vertical {{ background: {C.BORDER_B}; min-height: 22px; border-radius: 3px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        """)
+        about_info.addWidget(about_text, 1)
 
-        social_row = QHBoxLayout()
+        about_actions = panel(
+            about_actions_column,
+            "CREATOR & SOFTWARE UPDATES",
+            "Official project profile, verified releases and update controls.",
+        )
         self._instagram_btn = button("INSTAGRAM PROFILE ↗")
         _instagram_icon = CONFIG_DIR / "instagram.svg"
         if _instagram_icon.exists():
@@ -4726,42 +4795,30 @@ class MainWindow(QMainWindow):
         self._instagram_btn.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(_ORI_INSTAGRAM_URL))
         )
-        social_row.addWidget(self._instagram_btn)
-        social_row.addStretch(1)
-        about.addLayout(social_row)
+        about_actions.addWidget(self._instagram_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
         update_note = QLabel(
-            "SOFTWARE UPDATES · Check for a new ORI release. Downloads are verified before installation."
+            "SOFTWARE UPDATES · Check the official ORI release. Packages are SHA-256 verified before installation."
         )
         update_note.setWordWrap(True)
         update_note.setFont(QFont(UI_FONT, 8))
         update_note.setStyleSheet(f"color: {C.ACC}; background: transparent;")
-        about.addWidget(update_note)
+        about_actions.addWidget(update_note)
         self._app_update_status_lbl = QLabel("Update check has not been run.")
         self._app_update_status_lbl.setWordWrap(True)
         self._app_update_status_lbl.setFont(QFont(UI_FONT, 8))
         self._app_update_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
-        about.addWidget(self._app_update_status_lbl)
-        update_actions = QHBoxLayout()
-        update_actions.setSpacing(8)
-        self._check_updates_btn = button("CHECK FOR UPDATES", True)
-        self._check_updates_btn.clicked.connect(self._check_app_updates)
-        update_actions.addWidget(self._check_updates_btn)
-        self._download_update_btn = button("DOWNLOAD UPDATE")
-        self._download_update_btn.setEnabled(False)
-        self._download_update_btn.clicked.connect(self._download_app_update)
-        update_actions.addWidget(self._download_update_btn)
-        self._install_update_btn = button("INSTALL & RESTART")
-        self._install_update_btn.setEnabled(False)
-        self._install_update_btn.clicked.connect(self._install_app_update)
-        update_actions.addWidget(self._install_update_btn)
-        update_actions.addStretch(1)
-        about.addLayout(update_actions)
+        about_actions.addWidget(self._app_update_status_lbl)
+        self._update_app_btn = button("CHECK & INSTALL UPDATE", True)
+        self._update_app_btn.setMinimumWidth(210)
+        self._update_app_btn.clicked.connect(self._check_app_updates)
+        about_actions.addWidget(self._update_app_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
         terms_button = button("TERMS & CONDITIONS")
         terms_button.clicked.connect(lambda: self._show_terms_dialog(_ORI_TERMS_TEXT))
-        about.addWidget(terms_button, alignment=Qt.AlignmentFlag.AlignLeft)
-        about.addStretch(1)
+        about_actions.addWidget(terms_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        about_actions_column.addStretch(1)
+        about_info_column.addStretch(1)
         self._settings_stack.addWidget(p5)
 
         root.addWidget(self._settings_stack, 1)
@@ -4813,13 +4870,20 @@ class MainWindow(QMainWindow):
     def _refresh_temperature_sensor_status(self) -> None:
         if not hasattr(self, "_sensor_status_lbl"):
             return
-        value = _metrics.snapshot().get("tmp", -1.0)
+        snapshot = _metrics.snapshot()
+        value = snapshot.get("tmp")
+        provider = str(snapshot.get("tmp_provider") or "hardware sensor")
         if value is not None and float(value) >= 0:
-            self._sensor_status_lbl.setText(f"CPU SENSOR ONLINE · {float(value):.1f} °C · Live hardware reading.")
+            self._sensor_status_lbl.setText(
+                f"TEMPERATURE SENSOR ONLINE · {float(value):.1f} °C · Source: {provider}. "
+                "ORI uses this same sensor reading for system-status answers."
+            )
             self._sensor_status_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
         else:
             self._sensor_status_lbl.setText(
-                "CPU temperature is unavailable. With LibreHardwareMonitor 0.9.6, open Options → Remote Web Server → Run (default localhost:8085). ORI reads its local data.json endpoint and never invents a temperature."
+                "CPU temperature is unavailable from the sensors currently exposed by Windows. "
+                "Start LibreHardwareMonitor and enable its local Remote Web Server, or check that your hardware exposes a supported thermal sensor. "
+                "ORI does not invent a temperature or request administrator access."
             )
             self._sensor_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
 
@@ -4870,12 +4934,23 @@ class MainWindow(QMainWindow):
         label.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         return label
 
+    def _set_update_button(self, enabled: bool, label: str = "CHECK & INSTALL UPDATE") -> None:
+        button = getattr(self, "_update_app_btn", None)
+        if button is not None:
+            button.setEnabled(bool(enabled))
+            button.setText(label)
+
     def _check_app_updates(self) -> None:
-        if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(False)
-            self._check_updates_btn.setText("CHECKING…")
+        # A checksum-verified staged package can be installed without downloading it again.
+        staged = getattr(self, "_staged_update", None)
+        if isinstance(staged, dict) and staged.get("staged_dir") and getattr(sys, "frozen", False):
+            self._install_app_update()
+            return
+
+        self._set_update_button(False, "CHECKING…")
         if hasattr(self, "_app_update_status_lbl"):
-            self._app_update_status_lbl.setText("Checking the configured official GitHub repository…")
+            self._app_update_status_lbl.setText("Checking the official ORI release and installed version…")
+
         def worker():
             try:
                 from core.app_updater import check_for_updates
@@ -4883,34 +4958,55 @@ class MainWindow(QMainWindow):
             except Exception as exc:
                 result = {"ok": False, "message": f"Update check failed: {type(exc).__name__}: {exc}"}
             self._app_update_check_sig.emit(result)
+
         threading.Thread(target=worker, name="ori-update-check", daemon=True).start()
 
     def _apply_app_update_check(self, result: object) -> None:
         data = result if isinstance(result, dict) else {"ok": False, "message": "Invalid update response."}
         self._latest_update_info = data
-        if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(True)
-            self._check_updates_btn.setText("CHECK FOR UPDATES")
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(bool(data.get("ok") and data.get("update_available") and data.get("asset") and data.get("checksum_asset")))
-        if hasattr(self, "_app_update_status_lbl"):
-            if data.get("ok") and data.get("update_available"):
-                self._app_update_status_lbl.setText(
-                    f"UPDATE AVAILABLE · ORI {data.get('latest_version')} · SHA-256 verification required before install."
-                )
-                self._app_update_status_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
-            else:
-                self._app_update_status_lbl.setText(str(data.get("message") or "No update information."))
-                self._app_update_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM if data.get('ok') else C.ACC}; background: transparent;")
+        if not data.get("ok"):
+            self._app_update_status_lbl.setText(str(data.get("message") or "Update check failed."))
+            self._app_update_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
+            self._set_update_button(True)
+            return
+
+        if not data.get("update_available"):
+            self._app_update_status_lbl.setText(str(data.get("message") or "ORI is up to date."))
+            self._app_update_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+            self._set_update_button(True)
+            return
+
+        if not data.get("asset") or not data.get("checksum_asset"):
+            self._app_update_status_lbl.setText(
+                "A newer release exists, but its Windows package or SHA-256 file is missing. Installation was stopped."
+            )
+            self._app_update_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
+            self._set_update_button(True)
+            return
+
+        if not getattr(sys, "frozen", False):
+            self._app_update_status_lbl.setText(
+                f"ORI {data.get('latest_version')} is available. Automatic installation is enabled only for the packaged Windows app."
+            )
+            self._app_update_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
+            self._set_update_button(True)
+            return
+
+        self._app_update_status_lbl.setText(
+            f"ORI {data.get('latest_version')} is available. Downloading the package and verifying SHA-256…"
+        )
+        self._download_app_update()
 
     def _download_app_update(self) -> None:
         info = getattr(self, "_latest_update_info", None)
         if not isinstance(info, dict) or not info.get("update_available"):
+            self._set_update_button(True)
             return
-        self._download_update_btn.setEnabled(False)
-        self._download_update_btn.setText("DOWNLOADING…")
+
+        self._set_update_button(False, "DOWNLOADING…")
         if hasattr(self, "_app_update_status_lbl"):
-            self._app_update_status_lbl.setText("Downloading release and verifying its SHA-256 checksum…")
+            self._app_update_status_lbl.setText("Downloading the official package and checking its SHA-256 checksum…")
+
         def worker():
             try:
                 from core.app_updater import download_latest_update
@@ -4918,46 +5014,69 @@ class MainWindow(QMainWindow):
             except Exception as exc:
                 result = {"ok": False, "message": f"Update download failed: {type(exc).__name__}: {exc}"}
             self._app_update_download_sig.emit(result)
+
         threading.Thread(target=worker, name="ori-update-download", daemon=True).start()
 
     def _apply_app_update_download(self, result: object) -> None:
         data = result if isinstance(result, dict) else {"ok": False, "message": "Invalid download response."}
         self._staged_update = data if data.get("ok") else None
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(False)
-            self._download_update_btn.setText("DOWNLOAD UPDATE")
-        frozen = bool(getattr(sys, "frozen", False))
-        if hasattr(self, "_install_update_btn"):
-            self._install_update_btn.setEnabled(bool(data.get("ok") and frozen))
-        if hasattr(self, "_app_update_status_lbl"):
-            message = str(data.get("message") or "Update download finished.")
-            if data.get("ok") and not frozen:
-                message += " Source/development build detected: close ORI, then replace the source folder with the verified release package or update through Git."
-            self._app_update_status_lbl.setText(message)
-            self._app_update_status_lbl.setStyleSheet(f"color: {C.GREEN if data.get('ok') else C.ACC}; background: transparent;")
+        if not data.get("ok"):
+            self._app_update_status_lbl.setText(str(data.get("message") or "Update download failed."))
+            self._app_update_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
+            self._set_update_button(True)
+            return
+
+        if not getattr(sys, "frozen", False):
+            self._app_update_status_lbl.setText(
+                str(data.get("message") or "Update downloaded and verified.")
+                + " This source build cannot replace itself; use the packaged Windows app for automatic installation."
+            )
+            self._app_update_status_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
+            self._set_update_button(True)
+            return
+
+        self._app_update_status_lbl.setText(
+            str(data.get("message") or "Update downloaded and verified.")
+            + " Asking permission to close ORI and install it."
+        )
+        self._app_update_status_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
+        self._install_app_update()
 
     def _install_app_update(self) -> None:
         data = getattr(self, "_staged_update", None)
         if not isinstance(data, dict) or not data.get("staged_dir"):
+            self._set_update_button(True)
             return
+
         answer = QMessageBox.question(
             self, "Install ORI update?",
-            "ORI will close, replace its program files, preserve your configuration and memory, then restart. Continue?",
+            "The update has passed SHA-256 verification. ORI will close, replace its program files, preserve your configuration and memory, verify the installed files, and restart. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
+            self._app_update_status_lbl.setText(
+                "Update downloaded and verified. Installation was postponed. Press INSTALL VERIFIED UPDATE when you are ready."
+            )
+            self._set_update_button(True, "INSTALL VERIFIED UPDATE")
             return
+
+        self._set_update_button(False, "INSTALLING…")
         try:
             from core.app_updater import schedule_windows_update
             result = schedule_windows_update(str(data["staged_dir"]))
             if not result.get("ok"):
-                self._app_update_status_lbl.setText(str(result.get("message")))
+                self._app_update_status_lbl.setText(str(result.get("message") or "Could not start the update installer."))
+                self._app_update_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
+                self._set_update_button(True, "INSTALL VERIFIED UPDATE")
                 return
-            self._app_update_status_lbl.setText(str(result.get("message")))
+            self._app_update_status_lbl.setText(str(result.get("message") or "The verified update installer has started."))
+            self._app_update_status_lbl.setStyleSheet(f"color: {C.GREEN}; background: transparent;")
             QApplication.quit()
         except Exception as exc:
             self._app_update_status_lbl.setText(f"Could not schedule update: {type(exc).__name__}: {exc}")
+            self._app_update_status_lbl.setStyleSheet(f"color: {C.ACC}; background: transparent;")
+            self._set_update_button(True, "INSTALL VERIFIED UPDATE")
 
     def _refresh_settings_status(self):
         if not hasattr(self, "_gemini_status"):

@@ -304,12 +304,30 @@ def brightness_down():
             print(f"[Settings] Brightness down failed on Windows: {e}")
 
 def close_app():
-    if _OS == "Darwin": pyautogui.hotkey("command", "q")
-    else:               pyautogui.hotkey("alt", "f4")
+    """Gracefully close the active Windows app and verify the process has no visible windows."""
+    if _OS == "Windows":
+        try:
+            import pygetwindow
+            active = pygetwindow.getActiveWindow()
+            title = str(getattr(active, "title", "") or "").strip()
+            if not title:
+                return "No active titled window was found; no close request was sent."
+            from actions.computer_control import _close_window
+            return _close_window(title)
+        except Exception as exc:
+            return f"Could not safely identify the active app window: {type(exc).__name__}: {exc}"
+    if _OS == "Darwin":
+        pyautogui.hotkey("command", "q")
+    else:
+        pyautogui.hotkey("alt", "f4")
+    return "Close shortcut was sent to the active app, but its closed state is unverified."
 
 def close_window():
-    if _OS == "Darwin": pyautogui.hotkey("command", "w")
-    else:               pyautogui.hotkey("ctrl", "w")
+    if _OS == "Darwin":
+        pyautogui.hotkey("command", "w")
+    else:
+        pyautogui.hotkey("ctrl", "w")
+    return "Window/tab close shortcut was sent; the active window or tab closing is unverified."
 
 def full_screen():
     if _OS == "Darwin": pyautogui.hotkey("ctrl", "command", "f")
@@ -884,7 +902,10 @@ def computer_settings(
                     "Ask the user to answer that one first.")
         return confirm.request(
             key=action, title=title, detail=detail,
-            run=lambda f=func, a=action: (f(), f"{a} done.")[1],
+            run=lambda f=func, a=action: (
+                f(),
+                f"Confirmed action '{a}' was dispatched; completion is not independently verified.",
+            )[1],
         )
 
     if action == "volume_set":
@@ -905,29 +926,29 @@ def computer_settings(
             return "No text provided to type."
         enter_after = str(params.get("press_enter", "false")).lower() in ("true", "1", "yes")
         type_text(text, press_enter_after=enter_after)
-        return f"Typed: {text[:80]}"
+        return "Text input was sent to the focused control; the resulting field content is unverified."
 
     if action == "press_key":
         key = str(value or params.get("key", "")).strip()
         if not key:
             return "No key specified."
         press_key(key)
-        return f"Pressed: {key}"
+        return f"Key '{key}' was sent to the focused control; its effect is unverified."
 
     if action in ("reload_n", "refresh_n", "reload_page_n"):
         try:
             reload_page_n(int(value or 1))
-            return f"Reloaded {value or 1} time(s)."
+            return f"Reload shortcut was sent {value or 1} time(s); page load completion is unverified."
         except Exception as e:
             return f"Reload failed: {e}"
 
     if action == "scroll_up":
         scroll_up(int(value or 500))
-        return "Scrolled up."
+        return "Scroll-up input was sent; the resulting page position is unverified."
 
     if action == "scroll_down":
         scroll_down(int(value or 500))
-        return "Scrolled down."
+        return "Scroll-down input was sent; the resulting page position is unverified."
 
     func = ACTION_MAP.get(action)
     if not func:
@@ -945,7 +966,7 @@ def computer_settings(
         _before = ("brightness", brightness_get())
 
     try:
-        func()
+        action_result = func()
     except Exception as e:
         print(f"[Settings] Action failed ({action}): {e}")
         return f"Action failed ({action}): {e}"
@@ -964,13 +985,18 @@ def computer_settings(
         push_undo("dark mode toggled",
                   lambda: (dark_mode(), "Theme switched back.")[1])
 
-    return f"Done: {action}."
+    if isinstance(action_result, str) and action_result.strip():
+        return action_result
+    return (
+        f"System action '{action}' was dispatched, but the resulting system state is unverified. "
+        "Do not report this action as completed."
+    )
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_settings",
-    "description": "Controls the computer: volume, brightness, window management, keyboard shortcuts, typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. Use for ANY single computer control command. restart, shutdown and toggle_wifi put a confirmation on the user's screen and do NOT happen until they press it — never claim they are done. Volume, brightness and dark mode can be reversed with the `undo` tool.",
+    "description": "Controls volume, brightness, windows, keyboard shortcuts, typing, fullscreen, dark mode, WiFi, restart, shutdown, scrolling, tabs, zoom, screenshots and system settings. For app closing, prefer close_app: on Windows it sends a graceful WM_CLOSE request and verifies the target process has no visible windows; it will not force-close unsaved work. close_window only sends the active tab/window shortcut and its effect is unverified. Other keyboard/mouse actions report that input was dispatched, not that the intended UI change definitely happened. restart, shutdown and toggle_wifi require the user's on-screen confirmation; never claim they completed merely because the request was queued. Volume/brightness/dark mode may be reversed with undo where available.",
     "parameters": {
         "type": "OBJECT",
         "properties": {

@@ -185,6 +185,9 @@ def test_schedule_windows_update_launches_logged_verified_powershell_helper(
     assert "Get-FileHash -LiteralPath $sourceExe -Algorithm SHA256" in script
     assert "Invoke-VerifiedRobocopy -From $SourceDir -To $InstallDir" in script
     assert "ROLLBACK SUCCESS" in script
+    assert '"api_keys.json"' in script
+    assert 'Join-Path "config" "certs"' in script
+    assert "/XF" in script
     assert str(staged_dir) in command
     assert str(install_dir) in command
     assert result["log_file"].endswith(".log")

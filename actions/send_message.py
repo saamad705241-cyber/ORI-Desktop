@@ -148,7 +148,10 @@ def _desktop_send(app_name: str, receiver: str, message: str) -> str:
     time.sleep(0.2)
     pyautogui.press("enter")
     time.sleep(0.3)
-    return f"Message sent to {receiver} via {app_name}."
+    return (
+        f"Message entry and send keystrokes were attempted for {receiver} in {app_name}, "
+        "but recipient selection and delivery were not verified. Do not say the message was sent."
+    )
 
 def _send_whatsapp(receiver: str, message: str) -> str:
     """WhatsApp goes through the verified driver when there is one.
@@ -231,7 +234,10 @@ def _send_instagram(receiver: str, message: str) -> str:
     pyautogui.press("enter")
     time.sleep(0.3)
 
-    return f"Message sent to {receiver} via Instagram."
+    return (
+        f"Instagram send keystrokes were attempted for {receiver}, but recipient selection "
+        "and delivery were not verified. Do not say the message was sent."
+    )
 
 
 def _send_messenger(receiver: str, message: str) -> str:
@@ -253,7 +259,10 @@ def _send_messenger(receiver: str, message: str) -> str:
     pyautogui.press("enter")
     time.sleep(0.3)
 
-    return f"Message sent to {receiver} via Messenger."
+    return (
+        f"Messenger send keystrokes were attempted for {receiver}, but recipient selection "
+        "and delivery were not verified. Do not say the message was sent."
+    )
 
 _PLATFORM_MAP = [
     ({"whatsapp", "wp", "wapp"},              _send_whatsapp),

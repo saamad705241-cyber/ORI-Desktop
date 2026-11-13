@@ -395,7 +395,7 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                 cmd = ["open", "-a", app] + ([url] if url else [])
                 try:
                     subprocess.run(cmd, check=True, timeout=10)
-                    return f"Opened in {name}: {url}" if url else f"Opened {name}."
+                    return (f"Browser launch request sent to {name} for {url}; page load is unverified." if url else f"Browser launch request sent to {name}; window creation is unverified.")
                 except Exception as e:
                     print(f"[Browser] 'open -a {app}' failed ({e}), trying binary…")
 
@@ -412,7 +412,7 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                     [exe, url] if url else [exe],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
-                return f"Opened in {name}: {url}" if url else f"Opened {name}."
+                return (f"Browser launch request sent to {name} for {url}; page load is unverified." if url else f"Browser launch request sent to {name}; window creation is unverified.")
             except Exception as e:
                 print(f"[Browser] Native launch failed for {name}: {e}")
         print(f"[Browser] '{name}' not found — falling back to default browser.")
@@ -431,11 +431,11 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                 ["xdg-open", url],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-        return f"Opened in your default browser: {url}"
+        return f"Default-browser launch request sent for {url}; page load is unverified."
     except Exception:
         try:
             if webbrowser.open(url):
-                return f"Opened in your default browser: {url}"
+                return f"Default-browser launch request sent for {url}; page load is unverified."
         except Exception:
             pass
         return f"Could not open a browser for: {url}"
@@ -489,19 +489,26 @@ class _BrowserSession:
     def close(self):
         if self._loop:
             asyncio.run_coroutine_threadsafe(self._async_close(), self._loop).result(10)
+        elif self._context is not None or self._pw is not None:
+            raise RuntimeError("Browser session has resources but no active event loop; closure was not verified.")
 
     async def _async_close(self):
+        errors = []
         if self._context:
             try:
                 await self._context.close()
-            except Exception:
-                pass
+                self._context = None
+                self._page = None
+            except Exception as exc:
+                errors.append(f"browser context: {type(exc).__name__}: {exc}")
         if self._pw:
             try:
                 await self._pw.stop()
-            except Exception:
-                pass
-        self._context = self._page = None
+                self._pw = None
+            except Exception as exc:
+                errors.append(f"Playwright runtime: {type(exc).__name__}: {exc}")
+        if errors:
+            raise RuntimeError("Browser shutdown was not verified: " + "; ".join(errors))
 
     async def _adopt_page(self) -> Page:
         """
@@ -799,7 +806,9 @@ class _BrowserSession:
             await page.close()
             pages = ctx.pages
             self._page = pages[-1] if pages else None
-            return "Tab closed."
+            if page.is_closed():
+                return "Browser tab closed and page.is_closed() confirmed it."
+            return "Browser tab close was requested, but page.is_closed() did not confirm closure."
         return "No active tab to close."
 
     async def screenshot(self, path: str = None) -> str:
@@ -889,26 +898,48 @@ class _SessionRegistry:
 
     def close_one(self, browser_name: str) -> str:
         with self._lock:
-            sess = self._sessions.pop(browser_name, None)
-        if sess:
+            sess = self._sessions.get(browser_name)
+        if not sess:
+            return f"No active session for: {browser_name}"
+        try:
             sess.close()
+        except Exception as exc:
+            return (
+                f"Could not verify that {browser_name} closed: "
+                f"{type(exc).__name__}: {exc}. The session remains registered."
+            )
+        with self._lock:
+            if self._sessions.get(browser_name) is sess:
+                self._sessions.pop(browser_name, None)
             if self._active_browser == browser_name:
                 self._active_browser = ""
-            return f"{browser_name} closed."
-        return f"No active session for: {browser_name}"
+        return f"{browser_name} browser session closed and shutdown completed."
 
     def close_all(self) -> str:
         with self._lock:
-            names    = list(self._sessions.keys())
-            sessions = list(self._sessions.values())
-            self._sessions.clear()
-            self._active_browser = ""
-        for s in sessions:
+            sessions = list(self._sessions.items())
+        closed = []
+        failed = []
+        for name, sess in sessions:
             try:
-                s.close()
-            except Exception:
-                pass
-        return "All browsers closed: " + (", ".join(names) if names else "none")
+                sess.close()
+                closed.append(name)
+            except Exception as exc:
+                failed.append(f"{name}: {type(exc).__name__}: {exc}")
+        with self._lock:
+            for name in closed:
+                if self._sessions.get(name) in [sess for key, sess in sessions if key == name]:
+                    self._sessions.pop(name, None)
+            if self._active_browser in closed:
+                self._active_browser = ""
+        parts = []
+        if closed:
+            parts.append("Browser sessions closed: " + ", ".join(closed))
+        if failed:
+            parts.append("Could not verify closure for: " + "; ".join(failed))
+        if not parts:
+            return "No active browser sessions were open."
+        return ". ".join(parts) + "."
 
     def list_sessions(self) -> str:
         with self._lock:

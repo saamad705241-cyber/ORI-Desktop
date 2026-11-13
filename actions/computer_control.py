@@ -265,7 +265,14 @@ def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
 def _hotkey(*keys) -> str:
     _require_pyautogui()
     pyautogui.hotkey(*keys)
-    return f"Hotkey: {'+'.join(keys)}"
+    combo = "+".join(str(key).strip().lower() for key in keys)
+    if set(combo.split("+")) == {"alt", "f4"}:
+        return (
+            "Sent Alt+F4 to the focused window. This is only a close request; "
+            "the window's closed state is unverified. Use close_window with its title "
+            "to verify a graceful close."
+        )
+    return f"Sent hotkey: {'+'.join(keys)}"
 
 
 def _press(key: str) -> str:
@@ -329,6 +336,124 @@ def _clear_field() -> str:
     time.sleep(0.1)
     pyautogui.press("delete")
     return "Field cleared"
+
+def _close_window(title: str, timeout: float = 5.0) -> str:
+    """Request a graceful Windows window close and verify its process has no visible windows.
+
+    WM_CLOSE is deliberately used instead of terminating a process: apps can show
+    their normal save-confirmation dialog for unsaved work. If such a dialog or
+    another window from the same process remains, report failure/unverified state
+    rather than forcing the process to exit.
+    """
+    requested = str(title or "").strip()
+    if not requested:
+        return "No window title provided; no close request was sent."
+    if platform.system() != "Windows":
+        return "Verified close_window is currently supported on Windows only."
+
+    try:
+        import win32con
+        import win32gui
+    except Exception as exc:
+        return f"close_window is unavailable because Windows window APIs could not load: {exc}"
+
+    def visible_windows():
+        found = []
+
+        def collect(hwnd, _extra):
+            try:
+                if not win32gui.IsWindowVisible(hwnd):
+                    return True
+                caption = str(win32gui.GetWindowText(hwnd) or "").strip()
+                if not caption:
+                    return True
+                _thread, process_id = win32gui.GetWindowThreadProcessId(hwnd)
+                found.append({
+                    "handle": hwnd,
+                    "pid": int(process_id),
+                    "title": caption,
+                    "class": str(win32gui.GetClassName(hwnd) or ""),
+                })
+            except Exception:
+                pass
+            return True
+
+        win32gui.EnumWindows(collect, None)
+        return found
+
+    try:
+        requested_folded = requested.casefold().strip()
+
+        def title_matches(caption: str) -> bool:
+            folded = str(caption or "").casefold().strip()
+            if folded == requested_folded:
+                return True
+            # Windows commonly formats document titles as "Document - App".
+            # Match the app-name suffix rather than a loose substring, so
+            # "Notepad" cannot accidentally close "Notepad++".
+            tail = re.split(r"\s+[-–—]\s+", folded)[-1]
+            return tail == requested_folded or tail.endswith(" " + requested_folded)
+
+        matches = [
+            window for window in visible_windows()
+            if title_matches(window["title"])
+        ]
+        if not matches:
+            return (
+                f"No visible window matching '{requested}' was found. "
+                "No close request was sent; the app state is not confirmed."
+            )
+        if len(matches) > 1:
+            titles = "; ".join(window["title"] for window in matches[:4])
+            return (
+                f"Found {len(matches)} visible windows matching '{requested}' "
+                f"({titles}). None was closed because the target is ambiguous. "
+                "Specify a more precise window title."
+            )
+
+        target = matches[0]
+        if not target["pid"]:
+            return "The target window has no verifiable process ID; no close request was sent."
+
+        posted = win32gui.PostMessage(target["handle"], win32con.WM_CLOSE, 0, 0)
+        if posted is False:
+            return (
+                f"Windows rejected the close request for '{target['title']}'. "
+                "The window was not confirmed closed."
+            )
+
+        deadline = time.monotonic() + max(0.1, min(float(timeout), 15.0))
+        remaining = []
+        while time.monotonic() < deadline:
+            remaining = [
+                window for window in visible_windows()
+                if window["pid"] == target["pid"]
+            ]
+            if not remaining:
+                return (
+                    f"Closed '{target['title']}' and verified that process "
+                    f"{target['pid']} has no visible windows."
+                )
+            time.sleep(0.15)
+
+        titles = "; ".join(window["title"] for window in remaining[:4])
+        if any(
+            "save" in window["title"].casefold()
+            or "confirm" in window["title"].casefold()
+            or window["class"] == "#32770"
+            for window in remaining
+        ):
+            return (
+                f"Close was requested for '{target['title']}', but a save or "
+                f"confirmation dialog remains ({titles}). The app was not force-closed."
+            )
+        return (
+            f"Close was requested for '{target['title']}', but its process still "
+            f"has visible window(s): {titles}. The close was not verified."
+        )
+    except Exception as exc:
+        return f"Could not verify closing '{requested}': {type(exc).__name__}: {exc}"
+
 
 def _focus_window(title: str) -> str:
     os_name = _get_os()
@@ -449,7 +574,7 @@ def computer_control(
       direction     : 'up' | 'down' | 'left' | 'right'
       amount        : scroll amount (default: 3)
       seconds       : wait duration
-      title         : window title fragment for focus_window
+      title         : visible window title fragment for focus_window/close_window
       description   : natural-language element description for screen_find/click
       type          : data type for random_data
       field         : memory field name for user_data
@@ -473,6 +598,7 @@ def computer_control(
       wait          — sleep N seconds
       clear_field   — select-all + delete
       focus_window  — bring window to foreground
+      close_window  — request a graceful close and verify the target process windows disappeared
       screen_find   — AI element finder (returns x,y)
       screen_click  — AI element finder + click
       random_data   — generate fake form data
@@ -563,6 +689,9 @@ def computer_control(
         if action == "clear_field":
             return _clear_field()
 
+        if action == "close_window":
+            return _close_window(params.get("title", ""))
+
         if action == "focus_window":
             return _focus_window(params.get("title", ""))
 
@@ -591,13 +720,13 @@ def computer_control(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_control",
-    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements on screen.",
+    "description": "Direct computer control: type, click, hotkeys, scroll, move mouse, screenshots, find elements, focus windows, and gracefully close a uniquely identified window. Use close_window for app closing; it verifies that the target process has no visible windows and never force-kills unsaved work.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | screen_find | screen_click | random_data | user_data"
+                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_window | screen_find | screen_click | random_data | user_data"
             },
             "text": {
                 "type": "STRING",
@@ -633,7 +762,7 @@ TOOL = {
             },
             "title": {
                 "type": "STRING",
-                "description": "Window title for focus_window"
+                "description": "Visible window title fragment for focus_window or close_window"
             },
             "description": {
                 "type": "STRING",
