@@ -100,7 +100,7 @@ def test_unicode_grapheme_chunks_preserve_devanagari_and_wait_for_paste(monkeypa
     assert len(sleep_calls) == len(batches)
     assert all(delay >= cc._CLIPBOARD_PASTE_SETTLE_SECONDS for delay in sleep_calls)
 
-    expected_graphemes = cc._unicode_regex.findall(r"\\X", text)
+    expected_graphemes = cc._unicode_regex.findall(r"\X", text)
     actual_graphemes = [
         grapheme
         for batch in batches
