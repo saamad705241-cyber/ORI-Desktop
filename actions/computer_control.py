@@ -17,6 +17,12 @@ import threading
 from pathlib import Path
 
 try:
+    import regex as _unicode_regex
+except ImportError:
+    # Existing installs remain safe: Unicode falls back to a single paste batch.
+    _unicode_regex = None
+
+try:
     import pyautogui
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE    = 0.05
@@ -35,6 +41,10 @@ except ImportError:
 # path sets this event; typing checks it between small batches so it can stop
 # without waiting for a whole multi-thousand-character paste to finish.
 _ACTION_CANCEL = threading.Event()
+
+# Ctrl+V is asynchronous on Windows. Let the target application consume each
+# clipboard payload before replacing it with the next batch.
+_CLIPBOARD_PASTE_SETTLE_SECONDS = 0.06
 
 def request_cancel_current_action() -> None:
     """Ask a cooperative desktop action (especially typing) to stop promptly."""
@@ -176,11 +186,42 @@ def _user_profile() -> dict:
         pass
     return {}
 
-def _type_chunks(text: str, *, interval: float = 0.018, chunk_size: int = 8) -> tuple[int, bool]:
-    """Type in short cancellable batches; return (characters_sent, cancelled).
+def _grapheme_chunks(text: str, max_codepoints: int) -> list[str]:
+    """Split text without cutting an extended Unicode grapheme cluster.
 
-    Clipboard batches preserve Unicode (Hindi included). The clipboard is
-    restored even when the user interrupts halfway through a long operation.
+    Python string slicing counts code points, not user-visible characters.
+    That can split Devanagari conjuncts or combining marks and corrupt pasted
+    Hindi. The regex matcher follows Unicode grapheme boundaries.
+    """
+    limit = max(1, int(max_codepoints))
+    if _unicode_regex is None:
+        if text.isascii():
+            return [text[i:i + limit] for i in range(0, len(text), limit)]
+        # A safe single batch is preferable to corrupting Unicode text.
+        return [text] if text else []
+
+    clusters = _unicode_regex.findall(r"\X", text)
+    chunks: list[str] = []
+    current: list[str] = []
+    current_length = 0
+    for cluster in clusters:
+        if current and current_length + len(cluster) > limit:
+            chunks.append("".join(current))
+            current = []
+            current_length = 0
+        current.append(cluster)
+        current_length += len(cluster)
+    if current:
+        chunks.append("".join(current))
+    return chunks
+
+
+def _type_chunks(text: str, *, interval: float = 0.018, chunk_size: int = 8) -> tuple[int, bool]:
+    """Type in cancellable batches; return (codepoints_sent, cancelled).
+
+    Clipboard batches are split only at Unicode grapheme boundaries. Each paste
+    is allowed to settle before the clipboard changes again, and the original
+    clipboard is restored after the final paste or interruption.
     """
     _require_pyautogui()
     text = str(text or "")
@@ -193,17 +234,18 @@ def _type_chunks(text: str, *, interval: float = 0.018, chunk_size: int = 8) -> 
         except Exception:
             previous = None
         paste_key = "command" if _get_os() == "mac" else "ctrl"
+        settle = max(_CLIPBOARD_PASTE_SETTLE_SECONDS, max(0.0, float(interval)))
         try:
-            for start in range(0, len(text), max(1, int(chunk_size))):
+            for piece in _grapheme_chunks(text, chunk_size):
                 if _action_cancelled():
                     return sent, True
-                piece = text[start:start + max(1, int(chunk_size))]
                 pyperclip.copy(piece)
                 pyautogui.hotkey(paste_key, "v", _pause=False)
                 sent += len(piece)
-                # A tiny yield lets the audio callback's cancellation event win
-                # before the next batch. Do not use a single giant clipboard paste.
-                if _ACTION_CANCEL.wait(0.008):
+                # Do not replace the system clipboard until the target has had
+                # time to consume the Ctrl+V event. Check cancellation afterward.
+                time.sleep(settle)
+                if _action_cancelled():
                     return sent, True
             return sent, False
         finally:
@@ -249,7 +291,7 @@ def _type(text: str, interval: float = 0.03) -> str:
         return "No text was provided; nothing was typed."
     if _action_cancelled():
         return "Typing cancelled before it started; no keyboard text was sent."
-    sent, cancelled = _type_chunks(value, interval=interval, chunk_size=6)
+    sent, cancelled = _type_chunks(value, interval=interval, chunk_size=32)
     return _typing_feedback(sent, len(value), cancelled=cancelled)
 
 
