@@ -15,7 +15,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -166,35 +165,72 @@ def download_latest_update(info: dict[str, Any] | None = None) -> dict[str, Any]
 
 
 def schedule_windows_update(staged_dir: str) -> dict[str, Any]:
-    """Apply a verified one-folder update after ORI exits (frozen Windows only)."""
+    """Launch a logged PowerShell installer which verifies copy and restart."""
     if platform_name() != "Windows" or not getattr(sys, "frozen", False):
-        return {"ok": False, "message": "Automatic replacement is available only in the packaged Windows release. Source installs must be updated from the repository."}
+        return {
+            "ok": False,
+            "message": (
+                "Automatic replacement is available only in the packaged Windows release. "
+                "Source installs must be updated from the repository."
+            ),
+        }
+
     app_dir = Path(sys.executable).resolve().parent
     source = Path(staged_dir).resolve()
-    exe = app_dir / "ORI.exe"
-    if not exe.exists() or not source.exists():
-        return {"ok": False, "message": "The installed ORI folder or staged update package is missing."}
-    helper = Path(tempfile.gettempdir()) / f"ori_apply_update_{os.getpid()}.bat"
-    helper.write_text(
-        "@echo off\r\n"
-        "setlocal\r\n"
-        f'set "APP_DIR={app_dir}"\r\n'
-        f'set "SRC_DIR={source}"\r\n'
-        f'set "APP_PID={os.getpid()}"\r\n'
-        ':wait_app\r\n'
-        'tasklist /FI "PID eq %APP_PID%" 2>nul | find "%APP_PID%" >nul\r\n'
-        'if not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait_app)\r\n'
-        'robocopy "%SRC_DIR%" "%APP_DIR%" /E /R:3 /W:2 /XD "%APP_DIR%\\memory" "%APP_DIR%\\downloads" "%APP_DIR%\\screenshots" "%APP_DIR%\\logs" "%APP_DIR%\\config\\certs" /XF api_keys.json *.log\r\n'
-        'if %ERRORLEVEL% GEQ 8 exit /b 1\r\n'
-        'start "" "%APP_DIR%\\ORI.exe"\r\n'
-        'exit /b 0\r\n',
-        encoding="utf-8",
-    )
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-    subprocess.Popen(["cmd.exe", "/c", str(helper)], creationflags=flags,
-                     close_fds=True, cwd=str(app_dir))
-    return {"ok": True, "message": "Update staged. ORI will close and restart after the updater replaces program files. Personal config and memory are preserved."}
+    installed_exe = app_dir / "ORI.exe"
+    staged_exe = source / "ORI.exe"
+    if not installed_exe.is_file():
+        return {"ok": False, "message": f"The installed ORI executable is missing: {installed_exe}"}
+    if not staged_exe.is_file():
+        return {"ok": False, "message": f"The staged update does not contain ORI.exe: {staged_exe}"}
 
+    bundled_root = Path(getattr(sys, "_MEIPASS", app_dir)).resolve()
+    helper_source = bundled_root / "core" / "apply_update.ps1"
+    if not helper_source.is_file():
+        helper_source = Path(__file__).resolve().with_name("apply_update.ps1")
+    if not helper_source.is_file():
+        return {"ok": False, "message": f"The update helper is missing from this package: {helper_source}"}
+
+    state_dir = (
+        Path(os.environ.get("LOCALAPPDATA", str(Path.home())))
+        / "ORI" / "updates" / "install-helper"
+    )
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        helper = state_dir / f"apply-update-{os.getpid()}.ps1"
+        log_file = state_dir / f"install-{APP_VERSION}-{os.getpid()}.log"
+        rollback_dir = state_dir / f"rollback-{APP_VERSION}-{os.getpid()}"
+        shutil.copy2(helper_source, helper)
+        command = [
+            "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "Bypass", "-File", str(helper),
+            "-AppPid", str(os.getpid()),
+            "-SourceDir", str(source),
+            "-InstallDir", str(app_dir),
+            "-LogPath", str(log_file),
+            "-RollbackDir", str(rollback_dir),
+        ]
+        flags = (
+            getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        )
+        subprocess.Popen(
+            command, creationflags=flags, close_fds=True, cwd=str(app_dir),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        return {"ok": False, "message": f"Could not launch the update installer: {type(exc).__name__}: {exc}"}
+
+    return {
+        "ok": True,
+        "log_file": str(log_file),
+        "message": (
+            "Update installer started. ORI will close, copy the new program files, "
+            "verify the installed executable and restart. If installation fails, "
+            f"the previous build will be restored. Details: {log_file}"
+        ),
+    }
 
 def platform_name() -> str:
     import platform
