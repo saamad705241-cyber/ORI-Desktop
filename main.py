@@ -1420,7 +1420,7 @@ class JarvisLive:
                 _ctx = {"player": self.ui, "speak": self.speak,
                         "response": None, "session_memory": None}
                 r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
-                result = r or "Done."
+                result = r
                 # web_search: mirror results to the on-screen content panel
                 if (name == "web_search" and r
                         and not r.startswith("No results")
@@ -1436,7 +1436,7 @@ class JarvisLive:
                         None,
                         lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
                     )
-                    result = r or "Done."
+                    result = r if r else "Plugin returned no confirmation; outcome is unverified. Do not report success."
                 else:
                     result = f"Unknown tool: {name}"
 
