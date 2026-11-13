@@ -82,23 +82,35 @@ def _get_gpu_usage() -> float:
     return _nvml_gpu()
 
 
-def _get_cpu_temp() -> float:
+def _get_cpu_temp_reading() -> dict | None:
     """Read the same validated temperature source used by the desktop HUD."""
     try:
         from core.hardware_sensors import get_cpu_temperature
         reading = get_cpu_temperature()
-        if reading and reading.get("temperature_c") is not None:
-            return float(reading["temperature_c"])
+        if isinstance(reading, dict) and reading.get("temperature_c") is not None:
+            return reading
     except Exception:
         pass
-    return -1.0
+    return None
+
+
+def _get_cpu_temp() -> float:
+    reading = _get_cpu_temp_reading()
+    try:
+        return float(reading["temperature_c"]) if reading else -1.0
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return -1.0
 
 
 def get_system_status() -> dict:
     """Snapshot of current system metrics for the system_status tool."""
     cpu  = psutil.cpu_percent(interval=0.2)
     ram  = psutil.virtual_memory()
-    temp = _get_cpu_temp()
+    temp_reading = _get_cpu_temp_reading()
+    try:
+        temp = float(temp_reading["temperature_c"]) if temp_reading else -1.0
+    except (KeyError, TypeError, ValueError, OverflowError):
+        temp = -1.0
     gpu  = _get_gpu_usage()
 
     boot_time   = psutil.boot_time()
@@ -112,6 +124,7 @@ def get_system_status() -> dict:
         "ram_used_gb":   round(ram.used   / 1024 ** 3, 1),
         "ram_total_gb":  round(ram.total  / 1024 ** 3, 1),
         "cpu_temp_c":    round(temp, 1) if temp > 0 else None,
+        "cpu_temp_source": str(temp_reading.get("provider") or "hardware sensor") if temp > 0 and temp_reading else None,
         "gpu_percent":   round(gpu,  1) if gpu  >= 0 else None,
         "uptime":        f"{uptime_h}h {uptime_m}m",
         "process_count": len(psutil.pids()),
