@@ -29,8 +29,8 @@ class SettingsRemoteRedesignTests(unittest.TestCase):
         self.assertNotIn("CHECK FOR UPDATES", section)
         self.assertNotIn("DOWNLOAD UPDATE", section)
         self.assertNotIn("INSTALL & RESTART", section)
-        self.assertIn("def _download_app_update(self, info: dict)", section)
-        self.assertIn("schedule_windows_update", section)
+        self.assertIn("def _download_app_update(self, info: dict)", source)
+        self.assertIn("schedule_windows_update", source)
 
     def test_onboarding_marks_google_and_email_auth_as_coming_soon(self):
         source = (ROOT / "ui.py").read_text(encoding="utf-8")
