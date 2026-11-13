@@ -104,6 +104,6 @@ def test_unicode_grapheme_chunks_preserve_devanagari_and_wait_for_paste(monkeypa
     actual_graphemes = [
         grapheme
         for batch in batches
-        for grapheme in cc._unicode_regex.findall(r"\\X", batch)
+        for grapheme in cc._unicode_regex.findall(r"\X", batch)
     ]
     assert actual_graphemes == expected_graphemes
