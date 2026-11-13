@@ -296,8 +296,11 @@ def _handle_play(parameters: dict, player) -> str:
 
     if video_url:
         print(f"[YouTube] ▶️ Opening: {video_url}")
-        _open_url(video_url)
-        return f"Playing: {query}"
+        opened = _open_url(video_url)
+        return (
+            f"Video page request sent for '{query}'. Browser launch status: {opened!r}. "
+            "Actual playback is not verified; do not say the video is playing."
+        )
 
     print(f"[YouTube] ⚠️ Scrape failed, opening filtered search page")
     fallback_url = (
