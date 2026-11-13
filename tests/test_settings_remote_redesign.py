@@ -37,5 +37,27 @@ class SettingsRemoteRedesignTests(unittest.TestCase):
         self.assertIn("captureDesktopScreen", source)
 
 
+    def test_about_text_is_scrollable_and_updates_use_one_button(self):
+        source = (ROOT / "ui.py").read_text(encoding="utf-8")
+        start = source.index("    def _build_settings_page(self) -> QWidget:")
+        end = source.index("    def _select_settings_category(", start)
+        section = source[start:end]
+        self.assertIn("about_text = QTextEdit()", section)
+        self.assertIn("about_text.setReadOnly(True)", section)
+        self.assertIn('button("CHECK & INSTALL UPDATE", True)', section)
+        self.assertNotIn('button("DOWNLOAD UPDATE"', section)
+        self.assertNotIn('button("INSTALL & RESTART"', section)
+        self.assertNotIn("_check_updates_btn", source)
+        self.assertNotIn("_download_update_btn", source)
+        self.assertNotIn("_install_update_btn", source)
+
+    def test_update_flow_chains_check_download_and_install(self):
+        source = (ROOT / "ui.py").read_text(encoding="utf-8")
+        check_handler = source[source.index("    def _apply_app_update_check"):source.index("    def _download_app_update")]
+        download_handler = source[source.index("    def _apply_app_update_download"):source.index("    def _install_app_update")]
+        self.assertIn("self._download_app_update()", check_handler)
+        self.assertIn("self._install_app_update()", download_handler)
+
+
 if __name__ == "__main__":
     unittest.main()
