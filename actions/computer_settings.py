@@ -987,7 +987,10 @@ def computer_settings(
 
     if isinstance(action_result, str) and action_result.strip():
         return action_result
-    return f"System action '{action}' was dispatched; the resulting system state is unverified."
+    return (
+        f"System action '{action}' was dispatched, but the resulting system state is unverified. "
+        "Do not report this action as completed."
+    )
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
