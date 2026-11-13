@@ -122,3 +122,36 @@ def test_open_app_can_use_visible_title_fallback(monkeypatch):
     )
 
     assert open_app._windows_app_visible("notepad.exe") is True
+
+
+def test_youtube_empty_handler_result_is_unverified(monkeypatch):
+    from actions import youtube_video
+
+    monkeypatch.setitem(youtube_video._ACTION_MAP, "play", lambda *_args: None)
+
+    result = youtube_video.youtube_video({"action": "play"})
+
+    assert "outcome is unverified" in result
+
+
+def test_file_processor_empty_handler_result_is_unverified(monkeypatch, tmp_path):
+    from actions import file_processor
+
+    target = tmp_path / "notes.txt"
+    target.write_text("sample", encoding="utf-8")
+    monkeypatch.setattr(file_processor, "_process_text_doc", lambda *_args: None)
+
+    result = file_processor.file_processor({
+        "file_path": str(target),
+        "action": "summarize",
+    })
+
+    assert "outcome is unverified" in result
+
+
+def test_desktop_code_without_confirmation_is_unverified():
+    from actions import desktop
+
+    result = desktop._execute_generated_code("value = 1")
+
+    assert "outcome is unverified" in result
