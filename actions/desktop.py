@@ -96,7 +96,10 @@ def _execute_generated_code(code: str, player=None) -> str:
 
     try:
         exec(compile(code, "<jarvis_desktop>", "exec"), sandbox)
-        return "\n".join(output_lines) if output_lines else "Done."
+        return "\n".join(output_lines) if output_lines else (
+            "The desktop code ran without producing output. Any requested side effects "
+            "are unverified; do not report the task as completed."
+        )
     except Exception as e:
         print(f"[Desktop] Exec error: {e}\nCode:\n{code[:300]}")
         return f"Execution error: {e}"
