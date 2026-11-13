@@ -37,6 +37,22 @@ jobs:
         run: python scripts/compile_sources.py
       - name: Run automated tests
         run: python -m pytest -q
+      - name: Validate PowerShell updater scripts
+        shell: pwsh
+        run: |
+          $paths = @("core/apply_update.ps1", "scripts/bootstrap_update.ps1")
+          foreach ($path in $paths) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path), [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              throw "PowerShell syntax validation failed for $path"
+            }
+            Write-Host "PowerShell syntax valid: $path"
+          }
       - name: Ruff correctness checks
         run: python -m ruff check --select F821,F822,F823,F811 main.py ui.py core actions memory dashboard tests
 
