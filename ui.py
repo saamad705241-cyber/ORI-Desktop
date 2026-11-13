@@ -2987,10 +2987,11 @@ class MainWindow(QMainWindow):
         # Video surface shares the same central stack as the waveform and camera.
         self._video_split = False        # is the sound a separate stream?
         self._video_auto_muted = False   # did ORI close the mic, or the user?
-        # A plain flag rather than reading the widget. video_is_playing() is
-        # called from plugin threads, and reading a widget's state from one is
-        # not something to rely on; an attribute is.
+        # These plain flags are read from action worker threads. _video_on means
+        # the video panel is open; _video_playback_confirmed changes only when
+        # Qt reports QMediaPlayer.PlayingState.
         self._video_on = False
+        self._video_playback_confirmed = False
         self._video_cont = QWidget()
         self._video_cont.setStyleSheet(f"background: {C.BG};")
         _vid_v = QVBoxLayout(self._video_cont)
@@ -3062,6 +3063,7 @@ class MainWindow(QMainWindow):
             self._video_item.nativeSizeChanged.connect(self._fit_video)
             self._video_player.setAudioOutput(self._video_audio)
             self._video_player.errorOccurred.connect(self._on_video_error)
+            self._video_player.playbackStateChanged.connect(self._on_video_playback_state_changed)
 
             # A SECOND player, for sound that arrives separately.
             #
@@ -3351,13 +3353,22 @@ class MainWindow(QMainWindow):
             self._video_sound.setSource(QUrl())
         self._hud_cam_stack.setCurrentIndex(2)
         self._video_on = True
-        # Re-run now that the video counts as playing: _set_video_muted ran
+        self._video_playback_confirmed = False
+        # Re-run now that the video panel is open: _set_video_muted ran
         # before this line and saw no video, so its mic check was a no-op.
         self._sync_mic_for_video()
         self._video_player.play()
         if self._video_split:
             self._video_sound.play()
             self._video_sync.start()
+
+    def _on_video_playback_state_changed(self, state) -> None:
+        """Store Qt's real playback state for safe reads from action workers."""
+        self._video_playback_confirmed = bool(
+            self._video_on
+            and HAVE_VIDEO
+            and state == QMediaPlayer.PlaybackState.PlayingState
+        )
 
     def _fit_video(self, *_a) -> None:
         """Size the picture to the panel, keeping its shape."""
@@ -3381,6 +3392,7 @@ class MainWindow(QMainWindow):
         self._reset_video_players()
         self._video_split = False
         self._video_on = False
+        self._video_playback_confirmed = False
         self._hud_cam_stack.setCurrentIndex(0)
         self._sync_mic_for_video()      # gives the microphone back
 
@@ -3476,6 +3488,11 @@ class MainWindow(QMainWindow):
         self._video_close_sig.emit()
 
     def video_is_playing(self) -> bool:
+        """True only after Qt reports that the media player entered PlayingState."""
+        return bool(self._video_playback_confirmed)
+
+    def video_is_open(self) -> bool:
+        """True while the video panel is open, including buffering or paused states."""
         return bool(self._video_on)
 
     # ------------------------------------------------------------------
@@ -7817,6 +7834,9 @@ class JarvisUI:
 
     def video_is_playing(self) -> bool:
         return bool(self._win.video_is_playing())
+
+    def video_is_open(self) -> bool:
+        return bool(self._win.video_is_open())
 
     def start_camera_stream(self) -> None:
         """Thread-safe: start live camera feed in the full HUD area."""
