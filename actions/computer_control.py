@@ -391,7 +391,7 @@ def _close_window(title: str, timeout: float = 5.0) -> str:
             # Windows commonly formats document titles as "Document - App".
             # Match the app-name suffix rather than a loose substring, so
             # "Notepad" cannot accidentally close "Notepad++".
-            tail = re.split(r"\\s+[-–—]\\s+", folded)[-1]
+            tail = re.split(r"\s+[-–—]\s+", folded)[-1]
             return tail == requested_folded or tail.endswith(" " + requested_folded)
 
         matches = [
