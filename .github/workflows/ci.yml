@@ -40,7 +40,12 @@ jobs:
       - name: Validate PowerShell updater scripts
         shell: pwsh
         run: |
-          $paths = @("core/apply_update.ps1", "scripts/bootstrap_update.ps1")
+          $paths = @(
+            "core/apply_update.ps1",
+            "core/install_update.ps1",
+            "core/uninstall_launcher.ps1",
+            "scripts/bootstrap_update.ps1"
+          )
           foreach ($path in $paths) {
             $tokens = $null
             $errors = $null
