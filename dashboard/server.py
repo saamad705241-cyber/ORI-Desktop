@@ -684,7 +684,7 @@ class DashboardServer:
             return JSONResponse({
                 "ok": True,
                 "app": "ORI",
-                "version": "3.5.0",
+                "version": APP_VERSION,
                 "dashboard": "ready",
                 "https": bool(self._use_ssl),
                 "port": int(self.port or 0),
