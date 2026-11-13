@@ -4011,8 +4011,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_top_net_lbl"):
             self._top_net_lbl.set_metric(
                 rx_mbps + tx_mbps,
-                f"↓{rx_mbps:.1f} ↑{tx_mbps:.1f}",
-                getattr(self, "_metrics_display_mode", "both"),
+                f"{rx_mbps:.1f}/{tx_mbps:.1f}M",
+                "both",
                 tooltip=(
                     "Live computer network traffic, not an internet speed test. "
                     f"Download: {rx_mbps:.2f} Mbps · Upload: {tx_mbps:.2f} Mbps"
@@ -4028,7 +4028,7 @@ class MainWindow(QMainWindow):
                 provider = getattr(_metrics, "_gpu_provider", None) or "GPU telemetry"
                 self._top_gpu_lbl.set_metric(
                     gpu, f"{gpu:.0f}%",
-                    getattr(self, "_metrics_display_mode", "both"),
+                    "both",
                     tooltip=f"GPU utilisation: {gpu:.1f}% · Source: {provider}",
                 )
         else:
@@ -4059,7 +4059,7 @@ class MainWindow(QMainWindow):
                 )
                 self._top_disk_lbl.set_metric(
                     disk_percent, f"{disk_percent:.0f}%",
-                    getattr(self, "_metrics_display_mode", "both"),
+                    "both",
                     tooltip=disk_detail,
                     warning=disk_percent >= 95,
                 )
