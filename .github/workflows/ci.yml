@@ -131,9 +131,65 @@ jobs:
           $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  ORI-Setup-$version.exe" | Set-Content -Encoding ascii "$installer.sha256"
 
-          # Exercise the real per-user Setup and uninstaller in this clean CI account.
-          $testInstall = Join-Path $env:RUNNER_TEMP "ORI Installer Smoke"
+          # Full in-place upgrade test: install the published 3.6.0 Setup, then
+          # run the exact detached helper used by the installed application's updater.
+          $upgradeInstall = Join-Path $env:LOCALAPPDATA "Programs\ORI"
+          $previousSetup = Join-Path $env:RUNNER_TEMP "ORI-Setup-3.6.0.exe"
+          $previousChecksum = "$previousSetup.sha256"
+          $previousBase = "https://github.com/saamad705241-cyber/ORI-Desktop/releases/download/v3.6.0/ORI-Setup-3.6.0.exe"
+          Invoke-WebRequest -Uri $previousBase -OutFile $previousSetup -UseBasicParsing
+          Invoke-WebRequest -Uri "$previousBase.sha256" -OutFile $previousChecksum -UseBasicParsing
+          $expectedHash = [regex]::Match((Get-Content -LiteralPath $previousChecksum -Raw), "[A-Fa-f0-9]{64}")
+          if (!$expectedHash.Success) { throw "Published v3.6.0 checksum asset is invalid." }
+          $actualHash = (Get-FileHash -LiteralPath $previousSetup -Algorithm SHA256).Hash
+          if ($actualHash -ne $expectedHash.Value) { throw "Published v3.6.0 Setup checksum verification failed." }
+
+          $oldSetup = Start-Process -FilePath $previousSetup -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+            "/DIR=`"$upgradeInstall`""
+          ) -Wait -PassThru
+          if ($oldSetup.ExitCode -ne 0) { throw "Published v3.6.0 Setup exited with code $($oldSetup.ExitCode)." }
+          foreach ($requiredFile in @("ORI.exe", "unins000.exe", "python312.dll")) {
+            if (!(Test-Path (Join-Path $upgradeInstall $requiredFile))) {
+              throw "The v3.6.0 install is missing required file: $requiredFile"
+            }
+          }
+
           $userData = Join-Path $env:LOCALAPPDATA "ORI"
+          $updateSentinel = Join-Path $userData "memory\ci-update-preservation.txt"
+          New-Item -ItemType Directory -Path (Split-Path -Parent $updateSentinel) -Force | Out-Null
+          "keep-user-data-through-update" | Set-Content -Encoding utf8 $updateSentinel
+          $helperPath = (Resolve-Path "core/install_update.ps1").Path
+          $installerPath = (Resolve-Path $installer).Path
+          $updateLog = Join-Path $env:RUNNER_TEMP "ORI-3.6.0-to-$version-update.log"
+          $rollbackDir = Join-Path $env:RUNNER_TEMP "ORI-3.6.0-rollback"
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $helperPath -AppPid -1 -InstallerPath $installerPath -InstallDir $upgradeInstall -LogPath $updateLog -RollbackDir $rollbackDir
+          if ($LASTEXITCODE -ne 0) { throw "The real in-place update helper failed. Log: $updateLog" }
+          if (!(Select-String -LiteralPath $updateLog -Pattern "UPDATE SUCCESS" -Quiet)) {
+            throw "The update helper did not confirm its startup/restart check. Log: $updateLog"
+          }
+          $updatedEntry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -eq "ORI Personal AI Desktop Assistant" } |
+            Select-Object -First 1
+          if (!$updatedEntry -or $updatedEntry.DisplayVersion -ne $version) {
+            throw "In-place upgrade did not register ORI version $version."
+          }
+          if (!(Test-Path $updateSentinel)) { throw "The in-place update removed existing user data." }
+          $updatedProcesses = Get-Process -Name ORI -ErrorAction SilentlyContinue
+          if (!$updatedProcesses) { throw "Updated ORI did not remain running after its startup check." }
+          $updatedProcesses | Stop-Process -Force
+          Start-Sleep -Seconds 1
+          $upgradeUninstall = Start-Process -FilePath (Join-Path $upgradeInstall "unins000.exe") -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          ) -Wait -PassThru
+          if ($upgradeUninstall.ExitCode -ne 0) { throw "Post-update uninstaller exited with code $($upgradeUninstall.ExitCode)." }
+          if (Test-Path $upgradeInstall) { throw "Updated ORI program files remain after uninstall." }
+          if (!(Test-Path $updateSentinel)) { throw "Uninstall after update removed preserved user data." }
+          Remove-Item -LiteralPath $updateSentinel -Force
+          Write-Host "ORI 3.6.0 -> $version in-place Setup update, restart marker, rollback-ready helper and user-data preservation verified."
+
+          # Fresh installation and uninstall smoke test remains separate.
+          $testInstall = Join-Path $env:RUNNER_TEMP "ORI Installer Smoke"
           $sentinel = Join-Path $userData "memory\ci-uninstall-preservation.txt"
           New-Item -ItemType Directory -Path (Split-Path -Parent $sentinel) -Force | Out-Null
           "keep-user-data" | Set-Content -Encoding utf8 $sentinel
@@ -158,7 +214,7 @@ jobs:
           if (Test-Path $testInstall) { throw "ORI program files remain after uninstall." }
           if (!(Test-Path $sentinel)) { throw "ORI uninstall removed user data under LocalAppData." }
           Remove-Item -LiteralPath $sentinel -Force
-          Write-Host "ORI $version Setup, bundled Python runtime, uninstall entry and data-preserving uninstall verified."
+          Write-Host "ORI $version fresh Setup install, bundled runtime, uninstall entry and data-preserving uninstall verified."
 
       - uses: actions/upload-artifact@v4
         with:
