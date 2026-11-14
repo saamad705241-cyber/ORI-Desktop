@@ -63,18 +63,6 @@ The in-app update requires a Setup-managed Windows installation. Portable ZIP bu
 - The Windows package job builds the single Setup EXE, verifies its bundled runtime, tests a clean install/uninstall, and exercises an in-place upgrade from the published v3.6.0 Setup to the newly built candidate. The upgrade test checks startup acknowledgement, the installed version and preservation of user data.
 - `.github/workflows/release.yml` publishes a stable release only after tests pass and only when `APP_VERSION` is newer than the latest stable release.
 
-## One-time bootstrap for legacy 3.5.0 / 3.5.1 installs
+## Legacy portable builds
 
-The 3.5.0 and 3.5.1 packages contain the original batch updater. If that updater fails to replace the running executable, the installed build cannot reliably update itself to the repaired updater in 3.5.2.
-
-Run scripts/bootstrap_update.ps1 once from PowerShell while exactly one installed ORI.exe window is open. The script detects the running executable path, downloads the latest official Windows ZIP and SHA-256 sidecar, verifies the digest, extracts the package, launches its bundled core/apply_update.ps1, and requests a graceful close of the old ORI process. The new helper backs up the old files, replaces and verifies ORI.exe, and restarts ORI, with rollback on failure.
-
-Copy/run command after the bootstrap script is merged:
-
-    $script = Join-Path $env:TEMP "ori-bootstrap-update.ps1"
-    Invoke-WebRequest "https://raw.githubusercontent.com/saamad705241-cyber/ORI-Desktop/main/scripts/bootstrap_update.ps1" -OutFile $script
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script
-
-Run this as the same Windows user that launched ORI, without starting PowerShell as Administrator unless ORI itself is installed in a protected administrator-only folder. Keep ORI open while starting the script; it detects the live ORI.exe path rather than guessing an installation directory.
-
-The install log is written under %LOCALAPPDATA%/ORI/updates/install-helper. The bootstrap downloads the full Windows package automatically, so no manual ZIP extraction or file copying is needed. After the first successful bootstrap to 3.5.2, use ORI's normal built-in updater for future releases.
+The staged in-app updater is supported by Setup-managed Windows installs. Users still running a portable ZIP build from before v3.6.0 must install a current official Setup manually once. Keep the old portable folder until the new installation opens successfully and its API key and memory have been checked; do not assume an arbitrary old folder is auto-discovered.
