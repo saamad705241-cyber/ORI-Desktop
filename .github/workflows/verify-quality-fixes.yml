@@ -1,0 +1,125 @@
+name: Validate ORI 3.6.6 Audio and Desktop Fixes
+
+on:
+  push:
+    branches: [fix/ori-audio-desktop-control]
+    paths:
+      - "scripts/apply_quality_fixes.py"
+      - ".github/workflows/verify-quality-fixes.yml"
+      - ".github/workflows/build-uploaded-source.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ori-quality-fixes-validation
+  cancel-in-progress: true
+
+jobs:
+  validate-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Extract and patch the exact 3.6.5 uploaded source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:GITHUB_WORKSPACE "ORI365_SAFE.zip"
+          if (!(Test-Path -LiteralPath $archive -PathType Leaf)) {
+            throw "ORI365_SAFE.zip is missing."
+          }
+          $destination = Join-Path $env:RUNNER_TEMP "ori-quality-source"
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          $source = Join-Path $destination "ORI-3.6.5-Source-Publishing-SAFE"
+          if (!(Test-Path (Join-Path $source "main.py"))) {
+            throw "Could not locate the uploaded ORI source root."
+          }
+          $mainPath = Join-Path $source "main.py"
+          $mainText = [System.IO.File]::ReadAllText($mainPath)
+          $oldCode = "monitors     = await loop.run_in_executor(self._tool_executor, list_monitors)"
+          $newCode = "monitors     = await asyncio.get_running_loop().run_in_executor(self._tool_executor, list_monitors)"
+          if ($mainText.Contains($oldCode)) {
+            $mainText = $mainText.Replace($oldCode, $newCode)
+            [System.IO.File]::WriteAllText($mainPath, $mainText, [System.Text.UTF8Encoding]::new($false))
+          }
+          python (Join-Path $env:GITHUB_WORKSPACE "scripts/apply_quality_fixes.py") $source
+          if ($LASTEXITCODE -ne 0) { throw "Quality patch script failed." }
+          $workflowDest = Join-Path $source ".github/workflows"
+          New-Item -ItemType Directory -Path $workflowDest -Force | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE ".github/workflows/ci.yml") -Destination $workflowDest
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE ".github/workflows/release.yml") -Destination $workflowDest
+          $version = (python -c "from pathlib import Path; import ast; t=ast.parse(Path(r'$source/ori_metadata.py').read_text(encoding='utf-8')); print(next(n.value.value for n in t.body if isinstance(n,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='APP_VERSION' for x in n.targets)))").Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.6") {
+            throw "Expected patched source version 3.6.6, found '$version'."
+          }
+          "ORI_SOURCE=$source" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Patched exact uploaded source to ORI $version."
+
+      - name: Install dependencies
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/ori-quality-source/ORI-3.6.5-Source-Publishing-SAFE
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller pytest ruff
+
+      - name: Compile and run the full automated test suite
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/ori-quality-source/ORI-3.6.5-Source-Publishing-SAFE
+        run: |
+          python scripts/compile_sources.py
+          if ($LASTEXITCODE -ne 0) { throw "Python compile check failed." }
+          python -m pytest -q
+          if ($LASTEXITCODE -ne 0) { throw "Full ORI test suite failed." }
+          python -m ruff check --select F821,F822,F823,F811 main.py ui.py core actions memory dashboard tests
+          if ($LASTEXITCODE -ne 0) { throw "Ruff undefined-name and redefinition checks failed." }
+
+      - name: Build the Windows application bundle
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/ori-quality-source/ORI-3.6.5-Source-Publishing-SAFE
+        run: |
+          ./scripts/build_release.ps1
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller bundle build failed." }
+          foreach ($file in @("dist/ORI/ORI.exe", "dist/ORI/python312.dll", "dist/ORI/core/voice_leveler.py")) {
+            if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "Build output is missing $file." }
+          }
+          if (Test-Path "dist/ORI/config/api_keys.json") { throw "A private API config was packaged." }
+
+      - name: Compile installer and smoke-test install/uninstall
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/ori-quality-source/ORI-3.6.5-Source-Publishing-SAFE
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Could not install Inno Setup." }
+          $compiler = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$compiler) { throw "ISCC.exe was not found." }
+          & $compiler.FullName "/DMyAppVersion=3.6.6" "installer\ORI.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ORI Setup compilation failed." }
+          $installer = "dist/installer/ORI-Setup-3.6.6.exe"
+          if (!(Test-Path $installer)) { throw "ORI Setup 3.6.6 was not created." }
+          $testDir = Join-Path $env:RUNNER_TEMP "ORI-3.6.6-Quality-Smoke"
+          $install = Start-Process -FilePath (Resolve-Path $installer).Path -ArgumentList @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/DIR=`"$testDir`"") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Install smoke test failed with $($install.ExitCode)." }
+          foreach ($name in @("ORI.exe","python312.dll","unins000.exe")) {
+            if (!(Test-Path (Join-Path $testDir $name))) { throw "Install smoke test is missing $name." }
+          }
+          $uninstall = Start-Process -FilePath (Join-Path $testDir "unins000.exe") -ArgumentList @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART") -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstall smoke test failed with $($uninstall.ExitCode)." }
+          if (Test-Path $testDir) { throw "Smoke-test install directory remains after uninstall." }
+
+      - name: Upload the QA installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORI-3.6.6-Windows-QA-Installer
+          path: ${{ runner.temp }}/ori-quality-source/ORI-3.6.5-Source-Publishing-SAFE/dist/installer/ORI-Setup-3.6.6.exe
+          if-no-files-found: error
+          retention-days: 14
