@@ -4972,8 +4972,8 @@ class MainWindow(QMainWindow):
         about.addLayout(social_row)
 
         update_note = QLabel(
-            "SOFTWARE UPDATES · Each step is separate. Checking never downloads; "
-            "the installer is downloaded only when you press DOWNLOAD UPDATE."
+            "SOFTWARE UPDATES · One button guides you through each step: check, download, "
+            "then install and restart. Nothing downloads until you choose DOWNLOAD UPDATE."
         )
         update_note.setWordWrap(True)
         update_note.setFont(QFont(UI_FONT, 8))
@@ -4987,6 +4987,7 @@ class MainWindow(QMainWindow):
 
         self._latest_update_info = None
         self._staged_update = None
+        self._update_stage = "check"
         self._installed_setup_build = bool(
             platform.system() == "Windows"
             and getattr(sys, "frozen", False)
@@ -4994,18 +4995,13 @@ class MainWindow(QMainWindow):
         )
         update_actions = QHBoxLayout()
         update_actions.setSpacing(8)
-        self._check_updates_btn = button("CHECK FOR UPDATES", True)
-        self._check_updates_btn.setToolTip("Only checks GitHub. It does not download or install anything.")
-        self._check_updates_btn.clicked.connect(self._check_app_updates)
-        self._download_update_btn = button("DOWNLOAD UPDATE")
-        self._download_update_btn.setEnabled(False)
-        self._download_update_btn.clicked.connect(self._download_checked_update)
-        self._install_update_btn = button("INSTALL UPDATE")
-        self._install_update_btn.setEnabled(False)
-        self._install_update_btn.clicked.connect(self._install_downloaded_update)
-        update_actions.addWidget(self._check_updates_btn)
-        update_actions.addWidget(self._download_update_btn)
-        update_actions.addWidget(self._install_update_btn)
+        self._update_action_btn = button("CHECK FOR UPDATES", True)
+        self._update_action_btn.setToolTip(
+            "Checks GitHub first, then changes to Download Update and Install & Restart."
+        )
+        self._update_action_btn.clicked.connect(self._handle_update_action)
+        update_actions.addWidget(self._update_action_btn)
+        update_actions.addStretch(1)
         about.addLayout(update_actions)
 
         terms_button = button("TERMS & CONDITIONS")
@@ -5124,22 +5120,46 @@ class MainWindow(QMainWindow):
         label.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         return label
 
+    def _set_update_action(self, stage: str) -> None:
+        """Render the single update button for the current safe updater stage."""
+        labels = {
+            "check": "CHECK FOR UPDATES",
+            "checking": "CHECKING…",
+            "download": "DOWNLOAD UPDATE",
+            "downloading": "DOWNLOADING…",
+            "install": "INSTALL & RESTART",
+            "installing": "STARTING INSTALLER…",
+        }
+        if stage not in labels:
+            stage = "check"
+        self._update_stage = stage
+        action = getattr(self, "_update_action_btn", None)
+        if action is None:
+            return
+        action.setText(labels[stage])
+        action.setEnabled(
+            stage not in {"checking", "downloading", "installing"}
+            and not (stage == "install" and not self._installed_setup_build)
+        )
+
+    def _handle_update_action(self) -> None:
+        """Advance exactly one user-confirmed step in the update flow."""
+        stage = getattr(self, "_update_stage", "check")
+        if stage == "download":
+            self._download_checked_update()
+        elif stage == "install":
+            self._install_downloaded_update()
+        elif stage == "check":
+            self._check_app_updates()
+
     def _check_app_updates(self) -> None:
         """Stage one: check GitHub only. No package is downloaded here."""
         self._latest_update_info = None
         self._staged_update = None
-        if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(False)
-            self._check_updates_btn.setText("CHECKING…")
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(False)
-            self._download_update_btn.setText("DOWNLOAD UPDATE")
-        if hasattr(self, "_install_update_btn"):
-            self._install_update_btn.setEnabled(False)
-            self._install_update_btn.setText("INSTALL UPDATE")
+        self._set_update_action("checking")
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
-                "Checking the latest ORI release. This step does not download or install files."
+                "Checking the latest ORI release. No installer will be downloaded yet."
             )
 
         def worker():
@@ -5161,12 +5181,16 @@ class MainWindow(QMainWindow):
         }
         if not data.get("ok"):
             self._finish_update_flow(
-                str(data.get("message") or "Could not check for updates."), success=False
+                str(data.get("message") or "Could not check for updates."),
+                success=False,
+                stage="check",
             )
             return
         if not data.get("update_available"):
             self._finish_update_flow(
-                str(data.get("message") or "ORI is up to date."), success=True
+                str(data.get("message") or "ORI is up to date."),
+                success=True,
+                stage="check",
             )
             return
 
@@ -5175,23 +5199,16 @@ class MainWindow(QMainWindow):
                 "A newer release exists, but its ORI Setup installer or SHA-256 checksum is missing. "
                 "No files were downloaded.",
                 success=False,
+                stage="check",
             )
             return
 
         self._latest_update_info = data
-        if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(True)
-            self._check_updates_btn.setText("CHECK FOR UPDATES")
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(True)
-            self._download_update_btn.setText("DOWNLOAD UPDATE")
-        if hasattr(self, "_install_update_btn"):
-            self._install_update_btn.setEnabled(False)
-            self._install_update_btn.setText("INSTALL UPDATE")
+        self._set_update_action("download")
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
                 f"ORI {data.get('latest_version')} is available. Nothing has been downloaded. "
-                "Click DOWNLOAD UPDATE when you are ready."
+                "Click DOWNLOAD UPDATE to continue."
             )
             self._app_update_status_lbl.setStyleSheet(
                 f"color: {C.ACC}; background: transparent;"
@@ -5202,21 +5219,19 @@ class MainWindow(QMainWindow):
         info = getattr(self, "_latest_update_info", None)
         if not isinstance(info, dict):
             self._finish_update_flow(
-                "Check for updates first. No download was started.", success=False
+                "Check for updates first. No download was started.",
+                success=False,
+                stage="check",
             )
             return
         self._download_app_update(info)
 
     def _download_app_update(self, info: dict) -> None:
         """Download and verify the already-checked installer off the UI thread."""
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(False)
-            self._download_update_btn.setText("DOWNLOADING…")
-        if hasattr(self, "_install_update_btn"):
-            self._install_update_btn.setEnabled(False)
+        self._set_update_action("downloading")
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
-                f"Downloading ORI {info.get('latest_version')} Setup and checking SHA-256…"
+                f"Downloading ORI {info.get('latest_version')} Setup and verifying SHA-256…"
             )
 
         def worker():
@@ -5237,33 +5252,23 @@ class MainWindow(QMainWindow):
             "ok": False, "message": "Invalid update download response."
         }
         if not data.get("ok") or not data.get("installer_path"):
-            if hasattr(self, "_download_update_btn"):
-                self._download_update_btn.setEnabled(bool(self._latest_update_info))
-                self._download_update_btn.setText("DOWNLOAD UPDATE")
             self._finish_update_flow(
                 str(data.get("message") or "Installer download or SHA-256 verification failed."),
                 success=False,
+                stage="download",
             )
             return
 
         self._staged_update = data
-        if hasattr(self, "_download_update_btn"):
-            self._download_update_btn.setEnabled(False)
-            self._download_update_btn.setText("DOWNLOADED ✓")
-        if hasattr(self, "_install_update_btn"):
-            self._install_update_btn.setEnabled(bool(self._installed_setup_build))
-        if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(True)
-            self._check_updates_btn.setText("CHECK FOR UPDATES")
-
+        self._set_update_action("install")
         message = (
             f"ORI {data.get('version') or 'update'} Setup downloaded and SHA-256 verified. "
-            "Click INSTALL UPDATE when you are ready."
+            "Click INSTALL & RESTART when you are ready."
         )
         if not self._installed_setup_build:
             message += (
-                " Install ORI once with the official Setup first; in-app installation "
-                "is enabled for Setup-managed Windows installs."
+                " Install ORI once with the official Setup first; automatic in-app installation "
+                "is available for Setup-managed Windows installs."
             )
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(message)
@@ -5276,7 +5281,9 @@ class MainWindow(QMainWindow):
         data = getattr(self, "_staged_update", None)
         if not isinstance(data, dict) or not data.get("installer_path"):
             self._finish_update_flow(
-                "Download and verify an update before installing it.", success=False
+                "Download and verify an update before installing it.",
+                success=False,
+                stage="check",
             )
             return
         if not self._installed_setup_build:
@@ -5284,6 +5291,7 @@ class MainWindow(QMainWindow):
                 "In-app installation is available after ORI has been installed with ORI-Setup.exe. "
                 "The verified installer is saved and the current application was not changed.",
                 success=False,
+                stage="install",
             )
             return
 
@@ -5299,13 +5307,11 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        if hasattr(self, "_install_update_btn"):
-            self._install_update_btn.setEnabled(False)
-            self._install_update_btn.setText("STARTING INSTALLER…")
+        self._set_update_action("installing")
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
-                "Starting the verified Windows installer. ORI will close and the external "
-                "update helper will verify installation and restart."
+                "Starting the verified Windows Setup installer. ORI will close; the helper "
+                "will verify the installed version and restart before reporting success."
             )
         try:
             from core.app_updater import schedule_windows_update
@@ -5317,6 +5323,7 @@ class MainWindow(QMainWindow):
                 self._finish_update_flow(
                     str(scheduled.get("message") or "Could not start the update installer."),
                     success=False,
+                    stage="install",
                 )
                 return
             if hasattr(self, "_app_update_status_lbl"):
@@ -5328,6 +5335,7 @@ class MainWindow(QMainWindow):
             self._finish_update_flow(
                 f"Could not start the update installer: {type(exc).__name__}: {exc}",
                 success=False,
+                stage="install",
             )
 
     def _uninstall_ori(self) -> None:
@@ -5370,21 +5378,10 @@ class MainWindow(QMainWindow):
                 f"Could not start the uninstaller: {type(exc).__name__}: {exc}",
             )
 
-    def _finish_update_flow(self, message: str, *, success: bool) -> None:
-        check = getattr(self, "_check_updates_btn", None)
-        if check is not None:
-            check.setEnabled(True)
-            check.setText("CHECK FOR UPDATES")
-        download = getattr(self, "_download_update_btn", None)
-        if download is not None and not getattr(self, "_staged_update", None):
-            download.setEnabled(bool(getattr(self, "_latest_update_info", None)))
-            download.setText("DOWNLOAD UPDATE")
-        install = getattr(self, "_install_update_btn", None)
-        if install is not None:
-            install.setEnabled(bool(
-                getattr(self, "_staged_update", None) and self._installed_setup_build
-            ))
-            install.setText("INSTALL UPDATE")
+    def _finish_update_flow(
+        self, message: str, *, success: bool, stage: str = "check"
+    ) -> None:
+        self._set_update_action(stage)
         label = getattr(self, "_app_update_status_lbl", None)
         if label is not None:
             label.setText(str(message or "Update flow finished."))
