@@ -37,6 +37,8 @@ def test_update_helper_runs_setup_and_requires_startup_marker_before_success():
     assert "$startup.version" in source
     assert "$startup.executable" in source
     assert "15-second post-start stability check" in source
+    assert "[switch]$NoDialog" in source
+    assert "if (!$NoDialog)" in source
 
 
 def test_uninstaller_launcher_preserves_personal_data_folder():
