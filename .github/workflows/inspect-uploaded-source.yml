@@ -1,0 +1,40 @@
+name: Inspect uploaded ORI source
+on:
+  push:
+    branches:
+      - fix/ori-audio-desktop-control
+    paths:
+      - .github/workflows/inspect-uploaded-source.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract the uploaded ORI source archive
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:GITHUB_WORKSPACE "ORI365_SAFE.zip"
+          if (!(Test-Path $zip)) { throw "ORI365_SAFE.zip is missing from the repository." }
+          $dest = Join-Path $env:RUNNER_TEMP "ori-source-inspection"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
+          $source = Join-Path $dest "ORI-3.6.5-Source-Publishing-SAFE"
+          if (!(Test-Path (Join-Path $source "main.py"))) { throw "Expected ORI source root was not found after extraction." }
+          if (!(Test-Path (Join-Path $source "ori_metadata.py"))) { throw "ORI metadata is missing." }
+          Write-Host "Source extracted. File count:"
+          (Get-ChildItem -LiteralPath $source -Recurse -File | Measure-Object).Count
+
+      - name: Upload extracted source for code review
+        uses: actions/upload-artifact@v4
+        with:
+          name: ori-3.6.5-source-inspection
+          path: ${{ runner.temp }}/ori-source-inspection/ORI-3.6.5-Source-Publishing-SAFE/
+          if-no-files-found: error
+          retention-days: 3
