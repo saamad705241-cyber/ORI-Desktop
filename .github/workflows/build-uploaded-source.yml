@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: ori-source-zip-installer
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-release:
@@ -57,6 +57,16 @@ jobs:
           }
           "ORI_SOURCE=$source" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Validated uploaded ORI source version $version at $source"
+
+      - name: Confirm extracted source is the build source
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
+        run: |
+          $version = (python -c "from ori_metadata import APP_VERSION; print(APP_VERSION)").Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.5") {
+            throw "Build directory is not the expected ORI 3.6.5 extracted source. Found '$version'."
+          }
+          Write-Host "Building source version $version from the uploaded ZIP."
 
       - name: Install project and test dependencies
         shell: pwsh
@@ -161,6 +171,7 @@ jobs:
           make_latest: true
           prerelease: false
           draft: false
+          overwrite_files: true
           fail_on_unmatched_files: true
           files: |
             release-artifacts/ORI-Setup-3.6.5.exe
