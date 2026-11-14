@@ -48,3 +48,12 @@ def test_user_data_paths_are_outside_the_install_directory_for_frozen_builds():
     assert 'root / APP_NAME' in source
     assert '"config" / "api_keys.json"' in source
     assert '"memory" / "long_term.json"' in source
+
+
+def test_ci_exercises_a_real_in_place_upgrade_from_published_360():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "ORI-Setup-3.6.0.exe" in workflow
+    assert "core/install_update.ps1" in workflow
+    assert "UPDATE SUCCESS" in workflow
+    assert "DisplayVersion" in workflow
+    assert "ci-update-preservation.txt" in workflow
