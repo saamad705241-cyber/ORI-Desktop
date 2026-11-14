@@ -217,6 +217,8 @@ def test_schedule_windows_update_launches_logged_setup_helper(monkeypatch, tmp_p
     assert "ProgressBar" in script
     assert "-InstallHelperPath" in command
     backend_path = Path(command[command.index("-InstallHelperPath") + 1])
+    assert backend_path.is_file()
+    assert "updates" in [part.lower() for part in backend_path.parts]
     backend = backend_path.read_text(encoding="utf-8")
     assert "Wait-Process -Id $AppPid -Timeout 120" in backend
     assert "/VERYSILENT" in backend

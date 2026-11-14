@@ -389,6 +389,13 @@ def schedule_windows_update(
     assistant_log = state_dir / f"update-assistant-{APP_VERSION}-{os.getpid()}.log"
     backend_log = state_dir / f"update-backend-{APP_VERSION}-{os.getpid()}.log"
     rollback_dir = state_dir / f"rollback-{APP_VERSION}-{os.getpid()}"
+    persistent_install_helper = state_dir / f"install-update-{os.getpid()}.ps1"
+    try:
+        import shutil
+        state_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(install_helper, persistent_install_helper)
+    except OSError as exc:
+        return {"ok": False, "message": f"Could not prepare the persistent install helper: {exc}"}
     ok, detail, log_file = _launch_detached_helper(
         helper_source=assistant_source,
         state_dir=state_dir,
@@ -398,7 +405,7 @@ def schedule_windows_update(
             "-AppPid", str(os.getpid()), "-InstallerPath", str(installer),
             "-InstallDir", str(install_dir), "-ExpectedVersion", target_version,
             "-ExpectedSha256", actual_digest, "-LogPath", str(assistant_log),
-            "-RollbackDir", str(rollback_dir), "-InstallHelperPath", str(install_helper),
+            "-RollbackDir", str(rollback_dir), "-InstallHelperPath", str(persistent_install_helper),
             "-BackendLogPath", str(backend_log),
         ],
         cwd=install_dir,
