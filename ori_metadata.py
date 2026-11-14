@@ -11,13 +11,13 @@ normal users cannot edit it through Settings.
 # ---------------------------------------------------------------------------
 
 APP_NAME = "ORI"
-APP_VERSION = "3.6.2"
+APP_VERSION = "3.6.3"
 APP_RELEASE_LABEL = f"ORI {APP_VERSION}"
 APP_MODEL_LABEL = f"ORI Core {'.'.join(APP_VERSION.split('.')[:2])}"  # Product/runtime identity, not a foundation-model claim.
 BUILD_DATE = "14 November 2026"
 RELEASE_DATE = BUILD_DATE
 PLANNED_FINAL_RELEASE = "November 2026"
-RELEASE_STATUS = "Windows maintenance release with version-verified updater relaunch, rollback diagnostics and stable installer handoff; real-device media playback confirmation remains device-specific"
+RELEASE_STATUS = "Windows maintenance release with one-button staged updates, SHA-256 verified Setup downloads, exact-version startup verification and rollback of program files plus Windows version registration"
 
 # ORI acronym — official and canonical
 ORI_ACRONYM = {
@@ -87,7 +87,7 @@ Windows installer and update capability in this candidate
 - Windows distribution uses a per-user Inno Setup installer around the PyInstaller application bundle. The bundle includes its Python interpreter and required Python packages, so end users do not need to install Python, Java or Node.js.
 - Setup creates a Start Menu shortcut, offers an optional Desktop shortcut and registers a normal Windows uninstaller. Settings also contains an uninstall action with a personal-data retention notice.
 - API credentials, preferences and long-term memory are stored separately under %LOCALAPPDATA%\\ORI and are preserved when the program is updated or uninstalled. Existing portable config and memory are migrated without overwriting newer user data.
-- Settings separates Check for Updates, Download Update and Install Update. Checking does not download anything; the installer downloads only after the user presses Download Update, and SHA-256 is verified before Install Update becomes available.
+- Settings uses one progressive update button: Check for Updates → Download Update → Install & Restart. Each click performs only the current step; the Setup installer and SHA-256 sidecar are verified before restart/install is offered.
 - Install Update runs the verified Setup executable through a detached helper, checks a startup-ready marker and restores the previous program if the new installation fails.
 - A successful CI build is not a substitute for clean-machine Windows installation, update, rollback and uninstall testing. This candidate is not publicly release-verified until those tests pass.
 

@@ -132,27 +132,27 @@ jobs:
           $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  ORI-Setup-$version.exe" | Set-Content -Encoding ascii "$installer.sha256"
 
-          # Full in-place upgrade test: install the published 3.6.0 Setup, then
+          # Full in-place upgrade test: install the published 3.6.2 Setup, then
           # run the exact detached helper used by the installed application's updater.
           $upgradeInstall = Join-Path $env:LOCALAPPDATA "Programs\ORI"
-          $previousSetup = Join-Path $env:RUNNER_TEMP "ORI-Setup-3.6.0.exe"
+          $previousSetup = Join-Path $env:RUNNER_TEMP "ORI-Setup-3.6.2.exe"
           $previousChecksum = "$previousSetup.sha256"
-          $previousBase = "https://github.com/saamad705241-cyber/ORI-Desktop/releases/download/v3.6.0/ORI-Setup-3.6.0.exe"
+          $previousBase = "https://github.com/saamad705241-cyber/ORI-Desktop/releases/download/v3.6.2/ORI-Setup-3.6.2.exe"
           Invoke-WebRequest -Uri $previousBase -OutFile $previousSetup -UseBasicParsing
           Invoke-WebRequest -Uri "$previousBase.sha256" -OutFile $previousChecksum -UseBasicParsing
           $expectedHash = [regex]::Match((Get-Content -LiteralPath $previousChecksum -Raw), "[A-Fa-f0-9]{64}")
-          if (!$expectedHash.Success) { throw "Published v3.6.0 checksum asset is invalid." }
+          if (!$expectedHash.Success) { throw "Published v3.6.2 checksum asset is invalid." }
           $actualHash = (Get-FileHash -LiteralPath $previousSetup -Algorithm SHA256).Hash
-          if ($actualHash -ne $expectedHash.Value) { throw "Published v3.6.0 Setup checksum verification failed." }
+          if ($actualHash -ne $expectedHash.Value) { throw "Published v3.6.2 Setup checksum verification failed." }
 
           $oldSetup = Start-Process -FilePath $previousSetup -ArgumentList @(
             "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
             "/DIR=`"$upgradeInstall`""
           ) -Wait -PassThru
-          if ($oldSetup.ExitCode -ne 0) { throw "Published v3.6.0 Setup exited with code $($oldSetup.ExitCode)." }
+          if ($oldSetup.ExitCode -ne 0) { throw "Published v3.6.2 Setup exited with code $($oldSetup.ExitCode)." }
           foreach ($requiredFile in @("ORI.exe", "unins000.exe", "python312.dll")) {
             if (!(Test-Path (Join-Path $upgradeInstall $requiredFile))) {
-              throw "The v3.6.0 install is missing required file: $requiredFile"
+              throw "The v3.6.2 install is missing required file: $requiredFile"
             }
           }
 
@@ -162,8 +162,8 @@ jobs:
           "keep-user-data-through-update" | Set-Content -Encoding utf8 $updateSentinel
           $helperPath = (Resolve-Path "core/install_update.ps1").Path
           $installerPath = (Resolve-Path $installer).Path
-          $updateLog = Join-Path $env:RUNNER_TEMP "ORI-3.6.0-to-$version-update.log"
-          $rollbackDir = Join-Path $env:RUNNER_TEMP "ORI-3.6.0-rollback"
+          $updateLog = Join-Path $env:RUNNER_TEMP "ORI-3.6.2-to-$version-update.log"
+          $rollbackDir = Join-Path $env:RUNNER_TEMP "ORI-3.6.2-rollback"
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $helperPath -AppPid -1 -InstallerPath $installerPath -InstallDir $upgradeInstall -ExpectedVersion $version -NoDialog -LogPath $updateLog -RollbackDir $rollbackDir
           if ($LASTEXITCODE -ne 0) { throw "The real in-place update helper failed. Log: $updateLog" }
           if (!(Select-String -LiteralPath $updateLog -Pattern "UPDATE SUCCESS" -Quiet)) {
@@ -187,7 +187,7 @@ jobs:
           if (Test-Path $upgradeInstall) { throw "Updated ORI program files remain after uninstall." }
           if (!(Test-Path $updateSentinel)) { throw "Uninstall after update removed preserved user data." }
           Remove-Item -LiteralPath $updateSentinel -Force
-          Write-Host "ORI 3.6.0 -> $version in-place Setup update, restart marker, rollback-ready helper and user-data preservation verified."
+          Write-Host "ORI 3.6.2 -> $version in-place Setup update, restart marker, rollback-ready helper and user-data preservation verified."
 
           # Fresh installation and uninstall smoke test remains separate.
           $testInstall = Join-Path $env:RUNNER_TEMP "ORI Installer Smoke"

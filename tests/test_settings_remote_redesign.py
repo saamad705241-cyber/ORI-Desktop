@@ -20,16 +20,20 @@ class SettingsRemoteRedesignTests(unittest.TestCase):
         self.assertNotIn("Browser settings", section)
         self.assertNotIn("Gemini 3.7", section)
 
-    def test_updates_are_explicit_three_stage_actions_and_uninstall_is_present(self):
+    def test_updates_use_one_progressive_action_and_uninstall_is_present(self):
         source = (ROOT / "ui.py").read_text(encoding="utf-8")
         start = source.index("        # ABOUT & UPDATES")
         end = source.index("    def _select_settings_category(", start)
         section = source[start:end]
         self.assertIn('button("CHECK FOR UPDATES", True)', section)
-        self.assertIn('button("DOWNLOAD UPDATE")', section)
-        self.assertIn('button("INSTALL UPDATE")', section)
+        self.assertIn("self._update_action_btn.clicked.connect(self._handle_update_action)", section)
+        self.assertNotIn("_check_updates_btn", section)
+        self.assertNotIn("_download_update_btn", section)
+        self.assertNotIn("_install_update_btn", section)
         self.assertIn('button("UNINSTALL ORI")', section)
         self.assertIn("Your API key, preferences and ORI memory are kept", section)
+        self.assertIn('"download": "DOWNLOAD UPDATE"', source)
+        self.assertIn('"install": "INSTALL & RESTART"', source)
         check_method = source.split("    def _apply_app_update_check(", 1)[1].split(
             "    def _download_checked_update(", 1
         )[0]
