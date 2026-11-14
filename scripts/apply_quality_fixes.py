@@ -285,8 +285,8 @@ class SyncDecision:''',
         label="media progress watchdog helper",
     )
     replace_once(source / "ui.py",
-                 'from core.media_sync import audio_sync_action',
-                 'from core.media_sync import audio_sync_action, PlaybackProgressWatchdog',
+                 'from core.media_sync import SplitStreamSync',
+                 'from core.media_sync import SplitStreamSync, PlaybackProgressWatchdog',
                  label="UI watchdog import")
     replace_once(
         source / "ui.py",
