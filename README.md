@@ -1,4 +1,4 @@
-# ORI 3.6.0 — Personal AI Desktop Assistant
+# ORI 3.6.1 — Personal AI Desktop Assistant
 
 ORI is a Windows-first, voice-first desktop assistant built around Google Gemini Live, a dynamic action registry, local memory, Windows/browser automation and an optional paired-phone dashboard. The main interface remains a minimal dark terminal with a thin green audio signal; capabilities are invoked through natural language rather than a visible feature dashboard.
 
