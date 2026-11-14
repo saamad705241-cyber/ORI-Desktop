@@ -1,5 +1,13 @@
 # ORI Changelog
 
+## 3.6.2 (14 November 2026)
+
+- Require the update helper to verify the exact target version, Windows uninstall registration, startup-token PID, executable path and reported application version before confirming an update.
+- Allow up to 90 seconds for startup and monitor the relaunched process for 15 seconds before reporting success.
+- Stop an unverified new process before rollback, restore the previous program files on failure, and show the failure reason plus diagnostic log path.
+- Pass the expected target version from the downloaded release metadata through the Settings update action and the Windows helper.
+- Add Windows CI checks for the version handshake and target-version mismatch handling.
+
 ## 3.6.1 (14 November 2026)
 
 - Restore sharp YouTube playback by selecting the highest available stream up to 1080p instead of imposing the previous 720p ceiling.
