@@ -11,13 +11,13 @@ normal users cannot edit it through Settings.
 # ---------------------------------------------------------------------------
 
 APP_NAME = "ORI"
-APP_VERSION = "3.6.3"
+APP_VERSION = "3.6.4"
 APP_RELEASE_LABEL = f"ORI {APP_VERSION}"
 APP_MODEL_LABEL = f"ORI Core {'.'.join(APP_VERSION.split('.')[:2])}"  # Product/runtime identity, not a foundation-model claim.
 BUILD_DATE = "14 November 2026"
 RELEASE_DATE = BUILD_DATE
 PLANNED_FINAL_RELEASE = "November 2026"
-RELEASE_STATUS = "Windows maintenance release with one-button staged updates, SHA-256 verified Setup downloads, exact-version startup verification and rollback of program files plus Windows version registration"
+RELEASE_STATUS = "Windows maintenance release with real download progress, a visible ORI Update Assistant, SHA-256 verified Setup downloads, user-controlled Launch ORI after installation and rollback protection"
 
 # ORI acronym — official and canonical
 ORI_ACRONYM = {

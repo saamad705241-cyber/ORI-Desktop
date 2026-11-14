@@ -1,5 +1,15 @@
 # ORI Changelog
 
+## 3.6.4 (14 November 2026)
+
+- Show real installer download progress in Settings using downloaded bytes and the server-reported total size.
+- Download Setup atomically and discard incomplete installer files; verify the SHA-256 before allowing installation.
+- Add a separate Windows ORI Update Assistant with visible installation status.
+- Run the rollback-capable Setup helper without auto-launching the new app; show LAUNCH ORI only after installation and Windows version registration succeed.
+- Verify the selected app startup token, PID, version, executable path and 15-second stability before removing the previous-build rollback copy.
+- Include the assistant in the Windows package and validate its PowerShell syntax in CI.
+
+
 ## 3.6.3 (14 November 2026)
 
 - Replace three separate update buttons with one progressive Settings action: Check for Updates → Download Update → Install & Restart.

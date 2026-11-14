@@ -38,6 +38,9 @@ def test_update_helper_runs_setup_and_requires_startup_marker_before_success():
     assert "$startup.executable" in source
     assert "15-second post-start stability check" in source
     assert "[switch]$NoDialog" in source
+    assert "[switch]$NoLaunch" in source
+    assert "if ($NoLaunch)" in source
+    assert "ExpectedSha256" in source
     assert "if (!$NoDialog)" in source
     assert "$newProcess.Refresh()" in source
     assert "at the end of the 15-second post-start stability check" in source
@@ -84,8 +87,27 @@ def test_settings_uses_one_progressive_update_button():
     assert 'self._update_action_btn = button("CHECK FOR UPDATES", True)' in source
     assert 'self._update_action_btn.clicked.connect(self._handle_update_action)' in source
     assert '"download": "DOWNLOAD UPDATE"' in source
-    assert '"install": "INSTALL & RESTART"' in source
+    assert '"install": "OPEN UPDATE ASSISTANT"' in source
     assert "def _handle_update_action(self)" in source
     assert "_check_updates_btn" not in source
     assert "_download_update_btn" not in source
     assert "_install_update_btn" not in source
+
+
+def test_update_assistant_shows_install_progress_and_launch_button():
+    source = (ROOT / "core" / "update_assistant.ps1").read_text(encoding="utf-8")
+    assert "System.Windows.Forms.ProgressBar" in source
+    assert "LAUNCH ORI" in source
+    assert "Launch-UpdatedOri" in source
+    assert "15-second stability check" in source
+    assert "ExpectedSha256" in source
+    assert "-NoLaunch" in source
+
+
+def test_settings_shows_download_progress_and_opens_update_assistant():
+    source = (ROOT / "ui.py").read_text(encoding="utf-8")
+    assert "_app_update_progress_sig" in source
+    assert "QProgressBar()" in source
+    assert "progress_callback=lambda event" in source
+    assert "OPEN UPDATE ASSISTANT" in source
+    assert "expected_sha256" in source

@@ -9,7 +9,7 @@ class FakeResponse:
         self.status_code = status
         self._payload = payload or {}
         self.content = content
-        self.headers = {}
+        self.headers = {"Content-Length": str(len(content))}
 
     def json(self):
         return self._payload
@@ -113,13 +113,17 @@ def test_download_update_verifies_setup_exe_and_does_not_extract(monkeypatch, tm
         "checksum_asset": {"name": "ORI-Setup-3.6.0.exe.sha256", "browser_download_url": "https://test/app.exe.sha256"},
     }
 
-    result = updater.download_latest_update(info)
+    events = []
+    result = updater.download_latest_update(info, progress_callback=events.append)
     installer = Path(result["installer_path"])
     assert result["ok"] is True
     assert installer.is_file()
     assert installer.read_bytes() == installer_bytes
     assert installer.suffix.lower() == ".exe"
     assert "staged_dir" not in result
+    assert any(event.get("stage") == "download" for event in events)
+    assert any(event.get("stage") == "verify" for event in events)
+    assert any(event.get("stage") == "verified" for event in events)
 
 
 def test_download_update_rejects_checksum_mismatch_and_discards_installer(monkeypatch, tmp_path):
@@ -179,10 +183,11 @@ def test_schedule_windows_update_launches_logged_setup_helper(monkeypatch, tmp_p
 
     bundled_core = tmp_path / "bundle" / "core"
     bundled_core.mkdir(parents=True)
-    helper_source = Path(updater.__file__).resolve().with_name("install_update.ps1")
-    (bundled_core / "install_update.ps1").write_text(
-        helper_source.read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    for helper_name in ("update_assistant.ps1", "install_update.ps1"):
+        helper_source = Path(updater.__file__).resolve().with_name(helper_name)
+        (bundled_core / helper_name).write_text(
+            helper_source.read_text(encoding="utf-8"), encoding="utf-8"
+        )
 
     captured = {}
 
@@ -195,9 +200,11 @@ def test_schedule_windows_update_launches_logged_setup_helper(monkeypatch, tmp_p
     result = updater.schedule_windows_update(str(installer))
 
     assert result["ok"] is True
-    assert "verify" in result["message"].lower()
+    assert "assistant" in result["message"].lower()
     command = captured["command"]
     assert command[0].lower() == "powershell.exe"
+    assert "-STA" in command
+    assert "-NonInteractive" not in command
     assert "-File" in command
     assert "-InstallerPath" in command
     assert "-InstallDir" in command
@@ -206,11 +213,17 @@ def test_schedule_windows_update_launches_logged_setup_helper(monkeypatch, tmp_p
     assert str(installer) in command
     helper_path = Path(command[command.index("-File") + 1])
     script = helper_path.read_text(encoding="utf-8")
-    assert "Wait-Process -Id $AppPid -Timeout 120" in script
-    assert "/VERYSILENT" in script
-    assert "startup" in script
-    assert "UPDATE SUCCESS" in script
-    assert "ROLLBACK SUCCESS" in script
+    assert "LAUNCH ORI" in script
+    assert "ProgressBar" in script
+    assert "-InstallHelperPath" in command
+    backend_path = Path(command[command.index("-InstallHelperPath") + 1])
+    backend = backend_path.read_text(encoding="utf-8")
+    assert "Wait-Process -Id $AppPid -Timeout 120" in backend
+    assert "/VERYSILENT" in backend
+    assert "startup" in backend
+    assert "UPDATE SUCCESS" in backend
+    assert "ROLLBACK SUCCESS" in backend
+    assert "-ExpectedSha256" in command
     assert result["log_file"].endswith(".log")
     assert captured["kwargs"]["cwd"] == str(install_dir)
 

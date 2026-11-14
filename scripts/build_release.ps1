@@ -80,7 +80,7 @@ foreach ($asset in @("dashboard\static\app.html", "dashboard\static\login.html",
   }
 }
 if (!(Test-Path "dist\ORI\config")) { throw "Packaged UI asset directory is missing." }
-foreach ($helper in @("core\install_update.ps1", "core\uninstall_launcher.ps1", "core\app_updater.py", "core\app_paths.py")) {
+foreach ($helper in @("core\install_update.ps1", "core\update_assistant.ps1", "core\uninstall_launcher.ps1", "core\app_updater.py", "core\app_paths.py")) {
   if (!(Test-Path (Join-Path "dist\ORI" $helper))) {
     throw "Windows package is missing required installer/runtime file: $helper"
   }

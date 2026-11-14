@@ -2967,6 +2967,7 @@ class MainWindow(QMainWindow):
     _access_sig = pyqtSignal(str, bool)            # live microphone/screen/keyboard/speaker access
     _app_update_check_sig = pyqtSignal(object)
     _app_update_download_sig = pyqtSignal(object)
+    _app_update_progress_sig = pyqtSignal(object)
     _device_identity_sig = pyqtSignal(object)
 
     def __init__(self):
@@ -2978,6 +2979,7 @@ class MainWindow(QMainWindow):
         self._access_sig.connect(self._apply_access_indicator)
         self._app_update_check_sig.connect(self._apply_app_update_check)
         self._app_update_download_sig.connect(self._apply_app_update_download)
+        self._app_update_progress_sig.connect(self._apply_app_update_progress)
         self._access_labels: dict[str, QLabel] = {}
         self._access_active: set[str] = set()
         self._access_blink_phase = True
@@ -4984,6 +4986,23 @@ class MainWindow(QMainWindow):
         self._app_update_status_lbl.setFont(QFont(UI_FONT, 8))
         self._app_update_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         about.addWidget(self._app_update_status_lbl)
+        self._app_update_progress_lbl = QLabel("Waiting for a download.")
+        self._app_update_progress_lbl.setFont(QFont(UI_FONT, 8))
+        self._app_update_progress_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        self._app_update_progress_lbl.setVisible(False)
+        about.addWidget(self._app_update_progress_lbl)
+        self._app_update_progress = QProgressBar()
+        self._app_update_progress.setRange(0, 100)
+        self._app_update_progress.setValue(0)
+        self._app_update_progress.setFormat("%p%")
+        self._app_update_progress.setTextVisible(True)
+        self._app_update_progress.setFixedHeight(12)
+        self._app_update_progress.setStyleSheet(
+            f"QProgressBar {{ background: {C.BAR_BG}; color: {C.TEXT}; border: 1px solid {C.BORDER}; border-radius: 6px; text-align: center; }}"
+            f"QProgressBar::chunk {{ background: {C.GREEN}; border-radius: 5px; }}"
+        )
+        self._app_update_progress.setVisible(False)
+        about.addWidget(self._app_update_progress)
 
         self._latest_update_info = None
         self._staged_update = None
@@ -5127,7 +5146,7 @@ class MainWindow(QMainWindow):
             "checking": "CHECKING…",
             "download": "DOWNLOAD UPDATE",
             "downloading": "DOWNLOADING…",
-            "install": "INSTALL & RESTART",
+            "install": "OPEN UPDATE ASSISTANT",
             "installing": "STARTING INSTALLER…",
         }
         if stage not in labels:
@@ -5229,6 +5248,15 @@ class MainWindow(QMainWindow):
     def _download_app_update(self, info: dict) -> None:
         """Download and verify the already-checked installer off the UI thread."""
         self._set_update_action("downloading")
+        progress = getattr(self, "_app_update_progress", None)
+        progress_label = getattr(self, "_app_update_progress_lbl", None)
+        if progress is not None:
+            progress.setRange(0, 100)
+            progress.setValue(0)
+            progress.setVisible(True)
+        if progress_label is not None:
+            progress_label.setText("Starting secure download…")
+            progress_label.setVisible(True)
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
                 f"Downloading ORI {info.get('latest_version')} Setup and verifying SHA-256…"
@@ -5237,7 +5265,10 @@ class MainWindow(QMainWindow):
         def worker():
             try:
                 from core.app_updater import download_latest_update
-                result = download_latest_update(info)
+                result = download_latest_update(
+                    info,
+                    progress_callback=lambda event: self._app_update_progress_sig.emit(event),
+                )
             except Exception as exc:
                 result = {
                     "ok": False,
@@ -5246,6 +5277,38 @@ class MainWindow(QMainWindow):
             self._app_update_download_sig.emit(result)
 
         threading.Thread(target=worker, name="ori-update-download", daemon=True).start()
+
+    def _apply_app_update_progress(self, event: object) -> None:
+        data = event if isinstance(event, dict) else {}
+        bar = getattr(self, "_app_update_progress", None)
+        label = getattr(self, "_app_update_progress_lbl", None)
+        if bar is None or label is None:
+            return
+        bar.setVisible(True)
+        label.setVisible(True)
+        stage = str(data.get("stage") or "download")
+        downloaded = max(0, int(data.get("downloaded_bytes") or 0))
+        total = max(0, int(data.get("total_bytes") or 0))
+        if stage == "verify":
+            bar.setRange(0, 100)
+            bar.setValue(100)
+            label.setText("Download complete. Verifying SHA-256…")
+            return
+        if stage == "verified":
+            bar.setRange(0, 100)
+            bar.setValue(100)
+            label.setText("SHA-256 verified. Installer is ready.")
+            return
+        if total > 0:
+            bar.setRange(0, 100)
+            bar.setValue(max(0, min(100, int(data.get("percent") or 0))))
+            label.setText(
+                f"Downloaded {downloaded / (1024 * 1024):.1f} MB of "
+                f"{total / (1024 * 1024):.1f} MB"
+            )
+        else:
+            bar.setRange(0, 0)
+            label.setText(f"Downloaded {downloaded / (1024 * 1024):.1f} MB")
 
     def _apply_app_update_download(self, result: object) -> None:
         data = result if isinstance(result, dict) else {
@@ -5263,7 +5326,7 @@ class MainWindow(QMainWindow):
         self._set_update_action("install")
         message = (
             f"ORI {data.get('version') or 'update'} Setup downloaded and SHA-256 verified. "
-            "Click INSTALL & RESTART when you are ready."
+            "Click OPEN UPDATE ASSISTANT when you are ready."
         )
         if not self._installed_setup_build:
             message += (
@@ -5299,8 +5362,8 @@ class MainWindow(QMainWindow):
             self,
             "Install ORI Update",
             f"Install ORI {data.get('version') or 'update'} now?\n\n"
-            "ORI will close while the installer replaces the program files, then the updated "
-            "application will start automatically. Your API key, settings and memory are kept.",
+            "ORI will close while the separate Update Assistant installs the new version. "
+            "After verification, it will show a LAUNCH ORI button. Your API key, settings and memory are kept.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -5310,14 +5373,15 @@ class MainWindow(QMainWindow):
         self._set_update_action("installing")
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
-                "Starting the verified Windows Setup installer. ORI will close; the helper "
-                "will verify the installed version and restart before reporting success."
+                "Opening ORI Update Assistant. ORI will close; the assistant will show installation "
+                "status, verify the installed version and then offer LAUNCH ORI."
             )
         try:
             from core.app_updater import schedule_windows_update
             scheduled = schedule_windows_update(
                 str(data["installer_path"]),
                 expected_version=str(data.get("version") or ""),
+                expected_sha256=str(data.get("sha256") or ""),
             )
             if not scheduled.get("ok"):
                 self._finish_update_flow(
@@ -5328,7 +5392,7 @@ class MainWindow(QMainWindow):
                 return
             if hasattr(self, "_app_update_status_lbl"):
                 self._app_update_status_lbl.setText(str(scheduled.get("message") or (
-                    "Update helper started. ORI will close and the installer will verify restart."
+                    "Update Assistant opened. It will offer LAUNCH ORI after installation is verified."
                 )))
             QApplication.quit()
         except Exception as exc:
@@ -5382,6 +5446,15 @@ class MainWindow(QMainWindow):
         self, message: str, *, success: bool, stage: str = "check"
     ) -> None:
         self._set_update_action(stage)
+        if not success:
+            progress = getattr(self, "_app_update_progress", None)
+            progress_label = getattr(self, "_app_update_progress_lbl", None)
+            if progress is not None:
+                progress.setRange(0, 100)
+                progress.setValue(0)
+                progress.setVisible(False)
+            if progress_label is not None:
+                progress_label.setVisible(False)
         label = getattr(self, "_app_update_status_lbl", None)
         if label is not None:
             label.setText(str(message or "Update flow finished."))

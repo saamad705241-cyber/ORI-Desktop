@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
@@ -149,83 +149,149 @@ def check_for_updates(
         }
 
 
-def _download(url: str, target: Path, timeout: float = 45.0) -> None:
+
+def _download(
+    url: str,
+    target: Path,
+    timeout: float = 45.0,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    max_bytes: int = _MAX_DOWNLOAD,
+) -> None:
+    """Download atomically and report real byte counts to the Settings progress bar."""
     if not str(url or "").startswith("https://"):
         raise ValueError("Release asset URL must use HTTPS.")
-    total = 0
     target.parent.mkdir(parents=True, exist_ok=True)
-    with requests.get(
-        url,
-        stream=True,
-        timeout=(8, max(5.0, min(float(timeout), 90.0))),
-        headers={"Accept": "application/octet-stream"},
-    ) as response:
-        response.raise_for_status()
-        with target.open("wb") as output:
-            for chunk in response.iter_content(1024 * 256):
-                if not chunk:
-                    continue
-                total += len(chunk)
-                if total > _MAX_DOWNLOAD:
-                    raise ValueError("ORI Setup exceeds the 700 MB safety limit.")
-                output.write(chunk)
-    if total <= 0 or not target.is_file():
-        raise ValueError("The release server returned an empty installer file.")
+    part = target.with_name(target.name + ".part")
+    part.unlink(missing_ok=True)
+    total = 0
+    expected = 0
+    try:
+        with requests.get(
+            url,
+            stream=True,
+            timeout=(8, max(5.0, min(float(timeout), 90.0))),
+            headers={"Accept": "application/octet-stream"},
+        ) as response:
+            response.raise_for_status()
+            try:
+                expected = int(response.headers.get("Content-Length", 0) or 0)
+            except (TypeError, ValueError):
+                expected = 0
+            if expected > max_bytes:
+                raise ValueError("ORI Setup exceeds the 700 MB safety limit.")
+            with part.open("wb") as output:
+                for chunk in response.iter_content(1024 * 256):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError("ORI Setup exceeds the 700 MB safety limit.")
+                    output.write(chunk)
+                    if progress_callback is not None:
+                        try:
+                            progress_callback({
+                                "stage": "download",
+                                "downloaded_bytes": total,
+                                "total_bytes": expected,
+                                "percent": min(100, int(total * 100 / expected)) if expected else None,
+                                "status": "Downloading",
+                            })
+                        except Exception:
+                            pass
+        if total <= 0 or not part.is_file():
+            raise ValueError("The release server returned an empty installer file.")
+        os.replace(part, target)
+        if progress_callback is not None:
+            try:
+                progress_callback({
+                    "stage": "download", "downloaded_bytes": total,
+                    "total_bytes": expected or total, "percent": 100,
+                    "status": "Download complete",
+                })
+            except Exception:
+                pass
+    except Exception:
+        part.unlink(missing_ok=True)
+        raise
 
 
-def download_latest_update(info: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Download the Setup EXE and verify its SHA-256; never run it."""
+def _sha256_file(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def download_latest_update(
+    info: dict[str, Any] | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Download Setup, report actual progress and verify its SHA-256."""
     info = info or check_for_updates()
     if not info.get("ok") or not info.get("update_available"):
         return {"ok": False, "message": str(info.get("message") or "No update is available.")}
-
-    asset = info.get("asset")
-    checksum = info.get("checksum_asset")
+    asset, checksum = info.get("asset"), info.get("checksum_asset")
     if not isinstance(asset, dict) or not isinstance(checksum, dict):
-        return {
-            "ok": False,
-            "message": "The release is missing its ORI Setup installer or SHA-256 checksum asset.",
-        }
-
-    asset_name = Path(str(asset.get("name") or "")).name
-    if not _SETUP_RE.fullmatch(asset_name):
+        return {"ok": False, "message": "The release is missing the ORI Setup installer or SHA-256 checksum."}
+    name = Path(str(asset.get("name") or "")).name
+    if not _SETUP_RE.fullmatch(name):
         return {"ok": False, "message": "The release asset is not a versioned ORI Setup executable."}
-    if str(checksum.get("name") or "") != asset_name + ".sha256":
+    if str(checksum.get("name") or "") != name + ".sha256":
         return {"ok": False, "message": "The installer checksum sidecar does not match its file name."}
-
-    version_dir = str(info.get("tag_name") or info.get("latest_version") or "latest")
-    safe_version = re.sub(r"[^A-Za-z0-9_.-]", "_", version_dir)
-    download_dir = _local_app_data() / "ORI" / "updates" / safe_version
-    installer_path = download_dir / asset_name
-    checksum_path = download_dir / (asset_name + ".sha256")
+    urls = [str(asset.get("browser_download_url") or ""), str(checksum.get("browser_download_url") or "")]
+    if any(not item.startswith("https://") for item in urls):
+        return {"ok": False, "message": "Release asset URL must use HTTPS; nothing was downloaded."}
+    safe_version = re.sub(r"[^A-Za-z0-9_.-]", "_", str(info.get("tag_name") or info.get("latest_version") or "latest"))
+    folder = _local_app_data() / "ORI" / "updates" / safe_version
+    installer_path = folder / name
+    checksum_path = folder / (name + ".sha256")
     try:
-        _download(str(asset.get("browser_download_url") or ""), installer_path)
-        _download(str(checksum.get("browser_download_url") or ""), checksum_path)
-        expected_text = checksum_path.read_text(encoding="utf-8", errors="replace")
-        match = re.search(r"\b([a-fA-F0-9]{64})\b", expected_text)
+        _download(urls[1], checksum_path, max_bytes=64 * 1024)
+        match = re.search(r"\b([a-fA-F0-9]{64})\b", checksum_path.read_text(encoding="utf-8", errors="replace"))
         if not match:
             raise ValueError("The checksum file does not contain a SHA-256 digest.")
-        hasher = hashlib.sha256()
-        with installer_path.open("rb") as downloaded:
-            for block in iter(lambda: downloaded.read(1024 * 1024), b""):
-                hasher.update(block)
-        digest = hasher.hexdigest()
-        if digest.lower() != match.group(1).lower():
+        expected = match.group(1).lower()
+        if installer_path.is_file() and _sha256_file(installer_path) == expected:
+            digest = expected
+            if progress_callback is not None:
+                progress_callback({
+                    "stage": "verified", "downloaded_bytes": installer_path.stat().st_size,
+                    "total_bytes": installer_path.stat().st_size, "percent": 100,
+                    "status": "SHA-256 verified",
+                })
+            return {
+                "ok": True, "version": info.get("latest_version"),
+                "installer_path": str(installer_path), "sha256": digest,
+                "message": "The verified installer is already downloaded.",
+            }
+        installer_path.unlink(missing_ok=True)
+        _download(urls[0], installer_path, progress_callback=progress_callback)
+        if progress_callback is not None:
+            size = installer_path.stat().st_size
+            progress_callback({
+                "stage": "verify", "downloaded_bytes": size, "total_bytes": size,
+                "percent": 100, "status": "Verifying SHA-256",
+            })
+        digest = _sha256_file(installer_path)
+        if digest != expected:
             installer_path.unlink(missing_ok=True)
             raise ValueError("Installer SHA-256 verification failed; the file was discarded.")
+        if progress_callback is not None:
+            size = installer_path.stat().st_size
+            progress_callback({
+                "stage": "verified", "downloaded_bytes": size, "total_bytes": size,
+                "percent": 100, "status": "SHA-256 verified",
+            })
         return {
-            "ok": True,
-            "version": info.get("latest_version"),
-            "installer_path": str(installer_path),
-            "sha256": digest,
-            "message": f"ORI {info.get('latest_version')} Setup downloaded and SHA-256 verified.",
+            "ok": True, "version": info.get("latest_version"),
+            "installer_path": str(installer_path), "sha256": digest,
+            "message": f"ORI {info.get('latest_version')} Setup downloaded and verified.",
         }
     except Exception as exc:
         installer_path.unlink(missing_ok=True)
-        return {
-            "ok": False,
-            "message": f"Update download/verification failed: {type(exc).__name__}: {exc}",
-        }
+        installer_path.with_name(installer_path.name + ".part").unlink(missing_ok=True)
+        return {"ok": False, "message": f"Update download/verification failed: {type(exc).__name__}: {exc}"}
 
 
 def _launch_detached_helper(
@@ -250,7 +316,7 @@ def _launch_detached_helper(
             "powershell.exe",
             "-NoLogo",
             "-NoProfile",
-            "-NonInteractive",
+            "-STA",
             "-ExecutionPolicy",
             "Bypass",
             "-File",
@@ -279,14 +345,11 @@ def _launch_detached_helper(
 def schedule_windows_update(
     installer_path: str,
     expected_version: str | None = None,
+    expected_sha256: str | None = None,
 ) -> dict[str, Any]:
-    """Start the detached Setup helper with an exact version to verify after relaunch."""
+    """Open a visible Update Assistant for a verified Windows Setup installer."""
     if platform_name() != "Windows" or not getattr(sys, "frozen", False):
-        return {
-            "ok": False,
-            "message": "Automatic installation is available only in the installed Windows release.",
-        }
-
+        return {"ok": False, "message": "Automatic installation is available only in the installed Windows release."}
     install_dir = Path(sys.executable).resolve().parent
     installed_exe = install_dir / "ORI.exe"
     uninstaller = install_dir / "unins000.exe"
@@ -294,58 +357,57 @@ def schedule_windows_update(
     setup_match = _SETUP_RE.fullmatch(installer.name)
     target_version = str(expected_version or (setup_match.group(1) if setup_match else "")).strip()
     if not re.fullmatch(r"\d+\.\d+\.\d+", target_version):
-        return {
-            "ok": False,
-            "message": "The downloaded installer does not contain a valid target ORI version.",
-        }
+        return {"ok": False, "message": "The downloaded installer does not contain a valid target ORI version."}
     if not setup_match or setup_match.group(1) != target_version:
-        return {
-            "ok": False,
-            "message": "The target ORI version does not match the downloaded Setup filename.",
-        }
+        return {"ok": False, "message": "The target ORI version does not match the downloaded Setup filename."}
     if not installed_exe.is_file():
         return {"ok": False, "message": f"The installed ORI executable is missing: {installed_exe}"}
     if not uninstaller.is_file():
-        return {
-            "ok": False,
-            "message": "This copy was not installed with ORI Setup. Install ORI-Setup.exe once before using in-app updates.",
-        }
+        return {"ok": False, "message": "This copy was not installed with ORI Setup. Install ORI-Setup.exe once before using in-app updates."}
     if not installer.is_file() or installer.suffix.lower() != ".exe":
         return {"ok": False, "message": "The downloaded ORI Setup executable is missing or invalid."}
+    try:
+        actual_digest = _sha256_file(installer).lower()
+    except OSError as exc:
+        return {"ok": False, "message": f"The downloaded installer could not be read: {exc}"}
+    expected_digest = str(expected_sha256 or actual_digest).strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_digest) or actual_digest != expected_digest:
+        return {"ok": False, "message": "The downloaded installer no longer matches its SHA-256 checksum. Download it again."}
 
     bundled_root = Path(getattr(sys, "_MEIPASS", install_dir)).resolve()
-    helper_source = bundled_root / "core" / "install_update.ps1"
-    if not helper_source.is_file():
-        helper_source = Path(__file__).resolve().with_name("install_update.ps1")
+    assistant_source = bundled_root / "core" / "update_assistant.ps1"
+    install_helper = bundled_root / "core" / "install_update.ps1"
+    source_root = Path(__file__).resolve().parent
+    if not assistant_source.is_file():
+        assistant_source = source_root / "update_assistant.ps1"
+    if not install_helper.is_file():
+        install_helper = source_root / "install_update.ps1"
+    if not assistant_source.is_file() or not install_helper.is_file():
+        return {"ok": False, "message": "The ORI Update Assistant is missing from this build. Reinstall ORI before updating."}
 
     state_dir = _local_app_data() / "ORI" / "updates" / "install-helper"
-    log_name = f"install-{APP_VERSION}-{os.getpid()}.log"
+    assistant_log = state_dir / f"update-assistant-{APP_VERSION}-{os.getpid()}.log"
+    backend_log = state_dir / f"update-backend-{APP_VERSION}-{os.getpid()}.log"
     rollback_dir = state_dir / f"rollback-{APP_VERSION}-{os.getpid()}"
     ok, detail, log_file = _launch_detached_helper(
-        helper_source=helper_source,
+        helper_source=assistant_source,
         state_dir=state_dir,
-        script_prefix="install-update",
-        log_name=log_name,
+        script_prefix="update-assistant",
+        log_name=assistant_log.name,
         arguments=[
-            "-AppPid", str(os.getpid()),
-            "-InstallerPath", str(installer),
-            "-InstallDir", str(install_dir),
-            "-ExpectedVersion", target_version,
-            "-LogPath", str(log_file := (state_dir / log_name)),
-            "-RollbackDir", str(rollback_dir),
+            "-AppPid", str(os.getpid()), "-InstallerPath", str(installer),
+            "-InstallDir", str(install_dir), "-ExpectedVersion", target_version,
+            "-ExpectedSha256", actual_digest, "-LogPath", str(assistant_log),
+            "-RollbackDir", str(rollback_dir), "-InstallHelperPath", str(install_helper),
+            "-BackendLogPath", str(backend_log),
         ],
         cwd=install_dir,
     )
     if not ok:
-        return {"ok": False, "message": f"Could not launch the update installer: {detail}"}
+        return {"ok": False, "message": f"Could not launch the Update Assistant: {detail}"}
     return {
-        "ok": True,
-        "log_file": str(log_file or ""),
-        "message": (
-            f"The verified ORI {target_version} Setup installer has started. ORI will close; "
-            "the helper will verify the exact installed version, executable path and new process "
-            f"before reporting success. The previous build is restored on failure. Log: {log_file}"
-        ),
+        "ok": True, "log_file": str(log_file or ""),
+        "message": f"ORI Update Assistant opened for version {target_version}. It will show installation status and offer LAUNCH ORI after verification.",
     }
 
 

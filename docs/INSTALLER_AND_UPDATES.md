@@ -21,7 +21,7 @@ The application migrates existing portable config and memory once, without overw
 
 1. The single **Check for Updates** button queries the latest GitHub release only. It never downloads.
 2. If a newer release exists, that same button changes to **Download Update**. Clicking it downloads the matching `ORI-Setup-x.y.z.exe` and SHA-256 sidecar, then verifies the checksum.
-3. After verification, the same button changes to **Install & Restart**. After confirmation, a detached PowerShell helper waits for ORI to exit, backs up the program files and previous Windows version registration, runs the verified installer silently in the same install directory, launches the new ORI, and verifies its exact version, executable path and continued process liveness. Failure restores the previous program files and Windows version registration.
+3. After verification, confirm **Open Update Assistant**. The separate Windows assistant remains visible while ORI closes and Setup installs the new version. It verifies the Windows version registration, then enables **Launch ORI**. After launch, it checks the startup token, process ID, reported version, executable path and 15-second stability before removing the previous-build backup.
 
 The helper, transcript and rollback data are kept under `%LOCALAPPDATA%\ORI\updates`, outside the directory being replaced.
 

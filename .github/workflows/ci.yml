@@ -43,6 +43,7 @@ jobs:
           $paths = @(
             "core/apply_update.ps1",
             "core/install_update.ps1",
+            "core/update_assistant.ps1",
             "core/uninstall_launcher.ps1",
             "scripts/bootstrap_update.ps1"
           )
@@ -97,6 +98,7 @@ jobs:
             "dist/ORI/ORI.exe",
             "dist/ORI/core/apply_update.ps1",
             "dist/ORI/core/install_update.ps1",
+            "dist/ORI/core/update_assistant.ps1",
             "dist/ORI/core/uninstall_launcher.ps1",
             "dist/ORI/core/app_paths.py",
             "dist/ORI/core/crash_diagnostics.py",

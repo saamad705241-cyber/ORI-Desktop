@@ -51,7 +51,7 @@ The installed Settings page exposes three separate actions:
 
 1. The one Settings button starts as **Check for Updates** and queries GitHub metadata without downloading.
 2. When a release is available, it changes to **Download Update**. The click downloads the versioned Setup EXE and SHA-256 sidecar into `%LOCALAPPDATA%/ORI/updates/<version>`; a mismatch discards the installer.
-3. After verification, the same button changes to **Install & Restart**. Following confirmation, the detached helper verifies the exact installed version and process liveness. If the install fails, it restores previous program files and the previous Windows uninstall version registration.
+3. After verification, confirm **Open Update Assistant**. The separate Windows assistant remains visible while ORI closes and Setup installs the new version. It verifies the Windows version registration, then enables **Launch ORI**. After launch, it checks the startup token, process ID, reported version, executable path and 15-second stability before removing the previous-build backup.
 
 Personal settings, API credentials, memory, logs and downloads live outside the program directory and must remain intact through update and uninstall. Helper transcripts are stored under `%LOCALAPPDATA%/ORI/updates/install-helper`.
 

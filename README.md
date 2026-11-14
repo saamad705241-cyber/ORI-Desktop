@@ -1,4 +1,4 @@
-# ORI 3.6.3 — Personal AI Desktop Assistant
+# ORI 3.6.4
 
 ORI is a Windows-first, voice-first desktop assistant built around Google Gemini Live, a dynamic action registry, local memory, Windows/browser automation and an optional paired-phone dashboard. The main interface remains a minimal dark terminal with a thin green audio signal; capabilities are invoked through natural language rather than a visible feature dashboard.
 
@@ -55,7 +55,7 @@ ORI does not silently change a Windows network from Public to Private and does n
 - Configure `github_repository` in your private ORI config as `OWNER/REPOSITORY`.
 - In Settings → About, press the single **Check for Updates** button. It checks GitHub release metadata only.
 - When an update is available, that same button changes to **Download Update**. Download starts only after you click it; the Setup EXE and SHA-256 sidecar are verified.
-- After verification, the same button changes to **Install & Restart**. Confirm the prompt; a detached helper installs Setup, verifies the exact version and restarted process, and restores the previous program plus Windows version registration if startup fails.
+- After verification, the same button changes to **Open Update Assistant**. Confirm the prompt; a separate Windows assistant shows installation status while Setup runs, verifies the installed version, then provides **Launch ORI**. The previous program is backed up for rollback if installation or startup fails.
 - Settings → About → **Uninstall ORI** opens the Windows uninstall wizard after explaining what is removed. API keys, preferences and long-term memory are intentionally retained under `%LOCALAPPDATA%\ORI`.
 
 See `docs/INSTALLER_AND_UPDATES.md` and `docs/RELEASE_AND_UPDATES.md`.

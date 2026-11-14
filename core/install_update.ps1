@@ -5,7 +5,9 @@ param(
     [Parameter(Mandatory = $true)][string]$ExpectedVersion,
     [Parameter(Mandatory = $true)][string]$LogPath,
     [Parameter(Mandatory = $true)][string]$RollbackDir,
-    [switch]$NoDialog
+    [string]$ExpectedSha256 = "",
+    [switch]$NoDialog,
+    [switch]$NoLaunch
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -35,6 +37,13 @@ try {
     if ($ExpectedVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "ExpectedVersion must be a stable MAJOR.MINOR.PATCH value." }
     if ([System.IO.Path]::GetFileName($InstallerPath) -ne "ORI-Setup-$ExpectedVersion.exe") { throw "Installer filename does not match target version $ExpectedVersion." }
     if (!(Test-Path -LiteralPath $InstallerPath -PathType Leaf)) { throw "Verified installer is missing: $InstallerPath" }
+    if (![string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+        if ($ExpectedSha256 -notmatch "^[a-fA-F0-9]{64}$") { throw "ExpectedSha256 is not a valid digest." }
+        $initialHash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash
+        if (![string]::Equals($initialHash, $ExpectedSha256, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Installer SHA-256 verification failed before installation."
+        }
+    }
     if (!(Test-Path -LiteralPath $installExe -PathType Leaf)) { throw "Installed ORI.exe is missing: $installExe" }
     if (!(Test-Path -LiteralPath (Join-Path $InstallDir "unins000.exe") -PathType Leaf)) {
         throw "This copy is not registered as an installed ORI setup. Run ORI-Setup.exe once before using in-app updates."
@@ -68,6 +77,12 @@ try {
     }
     $backupReady = $true
 
+    if (![string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+        $currentHash = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash
+        if (![string]::Equals($currentHash, $ExpectedSha256, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Installer SHA-256 changed before execution."
+        }
+    }
     Write-Output "Running the SHA-256-verified ORI Setup installer silently."
     $arguments = @(
         "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
@@ -88,6 +103,11 @@ try {
         throw "Windows registered ORI version $registeredVersion, expected $ExpectedVersion."
     }
     Write-Output "Windows uninstall registration confirms ORI $ExpectedVersion."
+
+    if ($NoLaunch) {
+        Write-Output "UPDATE SUCCESS. ORI $ExpectedVersion installed and verified; waiting for the user to launch ORI."
+        exit 0
+    }
 
     $token = [Guid]::NewGuid().ToString("N")
     $readyDir = Join-Path $env:LOCALAPPDATA "ORI\updates\startup"
