@@ -31,7 +31,9 @@ try {
     Write-Output "ORI installer updater started: $(Get-Date -Format o)"
     Write-Output "Target version: $ExpectedVersion"
     Write-Output "Install directory: $installDir"
-    if ($ExpectedVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+ { throw "Verified installer is missing: $InstallerPath" }
+    if ($ExpectedVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "ExpectedVersion must be a stable MAJOR.MINOR.PATCH value." }
+    if ([System.IO.Path]::GetFileName($InstallerPath) -ne "ORI-Setup-$ExpectedVersion.exe") { throw "Installer filename does not match target version $ExpectedVersion." }
+    if (!(Test-Path -LiteralPath $InstallerPath -PathType Leaf)) { throw "Verified installer is missing: $InstallerPath" }
     if (!(Test-Path -LiteralPath $installExe -PathType Leaf)) { throw "Installed ORI.exe is missing: $installExe" }
     if (!(Test-Path -LiteralPath (Join-Path $InstallDir "unins000.exe") -PathType Leaf)) {
         throw "This copy is not registered as an installed ORI setup. Run ORI-Setup.exe once before using in-app updates."
@@ -145,84 +147,6 @@ catch {
         ) | Out-Null
     }
     catch { Write-Output "Could not display update failure details: $($_.Exception.Message)" }
-    exit 1
-}
-finally {
-    if ($transcriptStarted) { Stop-Transcript | Out-Null }
-}
-) { throw "ExpectedVersion must be a stable MAJOR.MINOR.PATCH value." }
-    if ([System.IO.Path]::GetFileName($InstallerPath) -ne "ORI-Setup-$ExpectedVersion.exe") { throw "Installer filename does not match target version $ExpectedVersion." }
-    if (!(Test-Path -LiteralPath $InstallerPath -PathType Leaf)) { throw "Verified installer is missing: $InstallerPath" }
-    if (!(Test-Path -LiteralPath $installExe -PathType Leaf)) { throw "Installed ORI.exe is missing: $installExe" }
-    if (!(Test-Path -LiteralPath (Join-Path $InstallDir "unins000.exe") -PathType Leaf)) {
-        throw "This copy is not registered as an installed ORI setup. Run ORI-Setup.exe once before using in-app updates."
-    }
-
-    Write-Output "Waiting up to 120 seconds for ORI PID $AppPid to exit."
-    if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) {
-        Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue
-    }
-    if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) {
-        throw "ORI PID $AppPid did not close within 120 seconds."
-    }
-
-    if (Test-Path -LiteralPath $RollbackDir) { Remove-Item -LiteralPath $RollbackDir -Recurse -Force }
-    New-Item -ItemType Directory -Path $RollbackDir -Force | Out-Null
-    Invoke-RobocopyChecked -From $InstallDir -To $RollbackDir
-    if (!(Test-Path -LiteralPath (Join-Path $RollbackDir "ORI.exe") -PathType Leaf)) {
-        throw "Rollback copy of ORI.exe was not created."
-    }
-    $backupReady = $true
-
-    Write-Output "Running the SHA-256-verified ORI Setup installer silently."
-    $arguments = @(
-        "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
-        "/CLOSEAPPLICATIONS", "/DIR=`"$InstallDir`""
-    )
-    $setup = Start-Process -FilePath $InstallerPath -ArgumentList $arguments -Wait -PassThru
-    if ($setup.ExitCode -ne 0) { throw "ORI Setup exited with code $($setup.ExitCode)." }
-    if (!(Test-Path -LiteralPath $installExe -PathType Leaf)) { throw "Setup completed but ORI.exe is missing." }
-    if (!(Test-Path -LiteralPath (Join-Path $InstallDir "unins000.exe") -PathType Leaf)) {
-        throw "Setup completed but the ORI uninstaller was not registered."
-    }
-
-    $token = [Guid]::NewGuid().ToString("N")
-    $readyDir = Join-Path $env:LOCALAPPDATA "ORI\updates\startup"
-    New-Item -ItemType Directory -Path $readyDir -Force | Out-Null
-    $readyFile = Join-Path $readyDir ($token + ".ready")
-    Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
-    $newProcess = Start-Process -FilePath $installExe -ArgumentList @("--ori-update-token=$token") -WorkingDirectory $InstallDir -PassThru
-
-    $deadline = (Get-Date).AddSeconds(45)
-    while ((Get-Date) -lt $deadline -and !(Test-Path -LiteralPath $readyFile)) {
-        if (!(Get-Process -Id $newProcess.Id -ErrorAction SilentlyContinue)) {
-            throw "Updated ORI exited before reporting startup ready (PID $($newProcess.Id))."
-        }
-        Start-Sleep -Milliseconds 250
-    }
-    if (!(Test-Path -LiteralPath $readyFile)) {
-        throw "Updated ORI did not report startup readiness within 45 seconds."
-    }
-    Start-Sleep -Seconds 5
-    if (!(Get-Process -Id $newProcess.Id -ErrorAction SilentlyContinue)) {
-        throw "Updated ORI exited shortly after reporting startup ready."
-    }
-    Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
-    Write-Output "UPDATE SUCCESS. Setup completed and ORI startup was verified (PID $($newProcess.Id))."
-}
-catch {
-    Write-Output "UPDATE FAILED: $($_.Exception.Message)"
-    if ($backupReady -and (Test-Path -LiteralPath (Join-Path $RollbackDir "ORI.exe") -PathType Leaf)) {
-        try {
-            Write-Output "Restoring the previous installed program files."
-            Invoke-RobocopyChecked -From $RollbackDir -To $InstallDir -Mirror
-            Start-Process -FilePath $installExe -WorkingDirectory $InstallDir | Out-Null
-            Write-Output "ROLLBACK SUCCESS. Previous ORI was restored and launched."
-        }
-        catch {
-            Write-Output "ROLLBACK FAILED: $($_.Exception.Message)"
-        }
-    }
     exit 1
 }
 finally {
