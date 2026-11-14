@@ -1,4 +1,4 @@
-import zipfile
+import hashlib
 from pathlib import Path
 
 from core import app_updater as updater
@@ -29,11 +29,60 @@ class FakeResponse:
         yield self.content
 
 
+def _release_payload():
+    installer_name = "ORI-Setup-3.6.0.exe"
+    return {
+        "tag_name": "v3.6.0",
+        "html_url": "https://github.com/samad/ori/releases/tag/v3.6.0",
+        "body": "Release notes",
+        "assets": [
+            {"name": installer_name, "browser_download_url": "https://example.test/" + installer_name},
+            {"name": installer_name + ".sha256", "browser_download_url": "https://example.test/" + installer_name + ".sha256"},
+        ],
+    }
+
+
 def test_repository_config_requires_owner_and_repo(monkeypatch):
     monkeypatch.setenv("ORI_GITHUB_REPOSITORY", "bad value")
     assert updater.configured_repository() == ""
     monkeypatch.setenv("ORI_GITHUB_REPOSITORY", "samad/ori")
     assert updater.configured_repository() == "samad/ori"
+
+
+def test_repository_defaults_to_official_ori_repository(monkeypatch):
+    monkeypatch.delenv("ORI_GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr("memory.config_manager.load_api_keys", lambda: {"github_repository": ""})
+    assert updater.configured_repository() == "saamad705241-cyber/ORI-Desktop"
+
+
+def test_update_check_only_reads_release_metadata_and_finds_setup_checksum(monkeypatch):
+    calls = []
+    response = FakeResponse(payload=_release_payload())
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return response
+
+    monkeypatch.setattr(updater.requests, "get", fake_get)
+    result = updater.check_for_updates(repo="samad/ori", current_version="3.5.4")
+
+    assert result["ok"] is True
+    assert result["update_available"] is True
+    assert result["asset"]["name"] == "ORI-Setup-3.6.0.exe"
+    assert result["checksum_asset"]["name"] == "ORI-Setup-3.6.0.exe.sha256"
+    assert len(calls) == 1
+    assert calls[0][0].endswith("/releases/latest")
+
+
+def test_update_check_reports_missing_setup_asset_without_downloading(monkeypatch):
+    payload = _release_payload()
+    payload["assets"] = []
+    monkeypatch.setattr(updater.requests, "get", lambda *_a, **_k: FakeResponse(payload=payload))
+    result = updater.check_for_updates(repo="samad/ori", current_version="3.5.4")
+    assert result["ok"] is True
+    assert result["update_available"] is True
+    assert result["asset"] is None
+    assert result["checksum_asset"] is None
 
 
 def test_update_check_reports_unconfigured_repository(monkeypatch):
@@ -44,58 +93,15 @@ def test_update_check_reports_unconfigured_repository(monkeypatch):
     assert result["configured"] is False
 
 
-def test_release_check_compares_semver_and_finds_checksum_asset(monkeypatch):
-    assets = [
-        {"name": "ORI-3.6.0-Windows.zip", "browser_download_url": "https://example.test/app.zip"},
-        {"name": "ORI-3.6.0-Windows.zip.sha256", "browser_download_url": "https://example.test/app.zip.sha256"},
-    ]
-    response = FakeResponse(payload={
-        "tag_name": "v3.6.0",
-        "html_url": "https://github.com/samad/ori/releases/tag/v3.6.0",
-        "body": "Release notes",
-        "assets": assets,
-    })
-    monkeypatch.setattr(updater.requests, "get", lambda *_a, **_k: response)
-    result = updater.check_for_updates(repo="samad/ori", current_version="3.5.0")
-    assert result["ok"] is True
-    assert result["update_available"] is True
-    assert result["asset"]["name"].endswith("-Windows.zip")
-    assert result["checksum_asset"]["name"].endswith(".sha256")
-
-
-def test_safe_extract_rejects_path_traversal(tmp_path):
-    archive = tmp_path / "bad.zip"
-    with zipfile.ZipFile(archive, "w") as zf:
-        zf.writestr("../escape.txt", "bad")
-    try:
-        updater._safe_extract(archive, tmp_path / "stage")
-    except ValueError as exc:
-        assert "unsafe path" in str(exc).lower()
-    else:
-        raise AssertionError("Unsafe archive path was accepted")
-
-
-def test_update_install_is_disabled_for_source_runs(monkeypatch, tmp_path):
-    monkeypatch.setattr(updater.sys, "frozen", False, raising=False)
-    result = updater.schedule_windows_update(str(tmp_path))
-    assert result["ok"] is False
-    assert "packaged Windows" in result["message"]
-
-
-def test_download_update_verifies_sha256_and_extracts(monkeypatch, tmp_path):
-    import hashlib
-    
-    archive_path = tmp_path / "payload.zip"
-    with zipfile.ZipFile(archive_path, "w") as zf:
-        zf.writestr("ORI/readme.txt", "verified")
-    archive_bytes = archive_path.read_bytes()
-    digest = hashlib.sha256(archive_bytes).hexdigest()
+def test_download_update_verifies_setup_exe_and_does_not_extract(monkeypatch, tmp_path):
+    installer_bytes = b"ORI SETUP TEST EXE CONTENT"
+    digest = hashlib.sha256(installer_bytes).hexdigest()
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
 
     def fake_get(url, **_kwargs):
         if url.endswith(".sha256"):
-            return FakeResponse(content=f"{digest}  ORI-3.6.0-Windows.zip\n".encode())
-        return FakeResponse(content=archive_bytes)
+            return FakeResponse(content=f"{digest}  ORI-Setup-3.6.0.exe\n".encode())
+        return FakeResponse(content=installer_bytes)
 
     monkeypatch.setattr(updater.requests, "get", fake_get)
     info = {
@@ -103,63 +109,79 @@ def test_download_update_verifies_sha256_and_extracts(monkeypatch, tmp_path):
         "update_available": True,
         "latest_version": "3.6.0",
         "tag_name": "v3.6.0",
-        "asset": {"name": "ORI-3.6.0-Windows.zip", "browser_download_url": "https://test/app.zip"},
-        "checksum_asset": {"name": "ORI-3.6.0-Windows.zip.sha256", "browser_download_url": "https://test/app.zip.sha256"},
+        "asset": {"name": "ORI-Setup-3.6.0.exe", "browser_download_url": "https://test/app.exe"},
+        "checksum_asset": {"name": "ORI-Setup-3.6.0.exe.sha256", "browser_download_url": "https://test/app.exe.sha256"},
     }
+
     result = updater.download_latest_update(info)
+    installer = Path(result["installer_path"])
     assert result["ok"] is True
-    assert Path(result["staged_dir"]).exists()
-    assert (Path(result["staged_dir"]) / "ORI" / "readme.txt").read_text() == "verified"
+    assert installer.is_file()
+    assert installer.read_bytes() == installer_bytes
+    assert installer.suffix.lower() == ".exe"
+    assert "staged_dir" not in result
 
 
-def test_download_update_rejects_checksum_mismatch(monkeypatch, tmp_path):
-    import zipfile as _zipfile
-    archive = tmp_path / "payload.zip"
-    with _zipfile.ZipFile(archive, "w") as zf:
-        zf.writestr("ORI/file.txt", "not trusted")
-    payload = archive.read_bytes()
+def test_download_update_rejects_checksum_mismatch_and_discards_installer(monkeypatch, tmp_path):
+    installer_bytes = b"not trusted"
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
 
     def fake_get(url, **_kwargs):
         if url.endswith(".sha256"):
             return FakeResponse(content=("0" * 64).encode())
-        return FakeResponse(content=payload)
+        return FakeResponse(content=installer_bytes)
 
     monkeypatch.setattr(updater.requests, "get", fake_get)
     info = {
         "ok": True, "update_available": True, "latest_version": "3.6.0", "tag_name": "v3.6.0",
-        "asset": {"name": "ORI-3.6.0-Windows.zip", "browser_download_url": "https://test/app.zip"},
-        "checksum_asset": {"name": "ORI-3.6.0-Windows.zip.sha256", "browser_download_url": "https://test/app.zip.sha256"},
+        "asset": {"name": "ORI-Setup-3.6.0.exe", "browser_download_url": "https://test/app.exe"},
+        "checksum_asset": {"name": "ORI-Setup-3.6.0.exe.sha256", "browser_download_url": "https://test/app.exe.sha256"},
     }
     result = updater.download_latest_update(info)
     assert result["ok"] is False
     assert "SHA-256" in result["message"]
+    assert not (tmp_path / "local" / "ORI" / "updates" / "v3.6.0" / "ORI-Setup-3.6.0.exe").exists()
 
 
-def test_schedule_windows_update_launches_logged_verified_powershell_helper(
-    monkeypatch, tmp_path
-):
+def test_download_rejects_non_https_release_assets(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    info = {
+        "ok": True, "update_available": True, "latest_version": "3.6.0", "tag_name": "v3.6.0",
+        "asset": {"name": "ORI-Setup-3.6.0.exe", "browser_download_url": "http://example.test/app.exe"},
+        "checksum_asset": {"name": "ORI-Setup-3.6.0.exe.sha256", "browser_download_url": "https://example.test/app.exe.sha256"},
+    }
+    result = updater.download_latest_update(info)
+    assert result["ok"] is False
+    assert "HTTPS" in result["message"]
+
+
+def test_update_install_is_disabled_for_source_runs(monkeypatch, tmp_path):
+    monkeypatch.setattr(updater, "platform_name", lambda: "Windows")
+    monkeypatch.setattr(updater.sys, "frozen", False, raising=False)
+    result = updater.schedule_windows_update(str(tmp_path / "ORI-Setup.exe"))
+    assert result["ok"] is False
+    assert "installed Windows release" in result["message"]
+
+
+def test_schedule_windows_update_launches_logged_setup_helper(monkeypatch, tmp_path):
     install_dir = tmp_path / "installed"
-    staged_dir = tmp_path / "staged"
     install_dir.mkdir()
-    staged_dir.mkdir()
-    installed_exe = install_dir / "ORI.exe"
-    staged_exe = staged_dir / "ORI.exe"
-    installed_exe.write_bytes(b"old-installed-build")
-    staged_exe.write_bytes(b"new-staged-build")
+    (install_dir / "ORI.exe").write_bytes(b"old-installed-build")
+    (install_dir / "unins000.exe").write_bytes(b"Inno uninstaller")
+    installer = tmp_path / "ORI-Setup-3.6.0.exe"
+    installer.write_bytes(b"verified-setup")
 
     monkeypatch.setattr(updater, "platform_name", lambda: "Windows")
     monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(updater.sys, "executable", str(installed_exe), raising=False)
+    monkeypatch.setattr(updater.sys, "executable", str(install_dir / "ORI.exe"), raising=False)
     monkeypatch.setattr(updater.sys, "_MEIPASS", str(tmp_path / "bundle"), raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
 
     bundled_core = tmp_path / "bundle" / "core"
     bundled_core.mkdir(parents=True)
-    helper_source = Path(updater.__file__).resolve().with_name("apply_update.ps1")
-    (bundled_core / "apply_update.ps1").write_text(
-        helper_source.read_text(encoding="utf-8"),
-        encoding="utf-8",
+    helper_source = Path(updater.__file__).resolve().with_name("install_update.ps1")
+    (bundled_core / "install_update.ps1").write_text(
+        helper_source.read_text(encoding="utf-8"), encoding="utf-8"
     )
 
     captured = {}
@@ -170,41 +192,67 @@ def test_schedule_windows_update_launches_logged_verified_powershell_helper(
         return object()
 
     monkeypatch.setattr(updater.subprocess, "Popen", fake_popen)
-
-    result = updater.schedule_windows_update(str(staged_dir))
+    result = updater.schedule_windows_update(str(installer))
 
     assert result["ok"] is True
-    assert "verify the installed executable" in result["message"]
+    assert "verify" in result["message"].lower()
     command = captured["command"]
     assert command[0].lower() == "powershell.exe"
     assert "-File" in command
+    assert "-InstallerPath" in command
+    assert "-InstallDir" in command
+    assert str(installer) in command
     helper_path = Path(command[command.index("-File") + 1])
-    assert helper_path.is_file()
     script = helper_path.read_text(encoding="utf-8")
     assert "Wait-Process -Id $AppPid -Timeout 120" in script
-    assert "Get-FileHash -LiteralPath $sourceExe -Algorithm SHA256" in script
-    assert "Invoke-VerifiedRobocopy -From $SourceDir -To $InstallDir" in script
+    assert "/VERYSILENT" in script
+    assert "startup" in script
+    assert "UPDATE SUCCESS" in script
     assert "ROLLBACK SUCCESS" in script
-    assert str(staged_dir) in command
-    assert str(install_dir) in command
     assert result["log_file"].endswith(".log")
     assert captured["kwargs"]["cwd"] == str(install_dir)
 
 
-def test_schedule_windows_update_rejects_staged_folder_without_ori_exe(
-    monkeypatch, tmp_path
-):
-    install_dir = tmp_path / "installed"
+def test_schedule_windows_update_requires_setup_managed_install(monkeypatch, tmp_path):
+    install_dir = tmp_path / "portable"
     install_dir.mkdir()
-    (install_dir / "ORI.exe").write_bytes(b"old")
-    staged_dir = tmp_path / "staged"
-    staged_dir.mkdir()
-
+    (install_dir / "ORI.exe").write_bytes(b"app")
+    installer = tmp_path / "ORI-Setup-3.6.0.exe"
+    installer.write_bytes(b"installer")
     monkeypatch.setattr(updater, "platform_name", lambda: "Windows")
     monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
     monkeypatch.setattr(updater.sys, "executable", str(install_dir / "ORI.exe"), raising=False)
 
-    result = updater.schedule_windows_update(str(staged_dir))
-
+    result = updater.schedule_windows_update(str(installer))
     assert result["ok"] is False
-    assert "staged update does not contain ORI.exe" in result["message"]
+    assert "ORI Setup" in result["message"]
+
+
+def test_schedule_uninstall_uses_detached_user_visible_uninstaller(monkeypatch, tmp_path):
+    install_dir = tmp_path / "installed"
+    install_dir.mkdir()
+    (install_dir / "ORI.exe").write_bytes(b"app")
+    (install_dir / "unins000.exe").write_bytes(b"uninstall")
+    monkeypatch.setattr(updater, "platform_name", lambda: "Windows")
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updater.sys, "executable", str(install_dir / "ORI.exe"), raising=False)
+    monkeypatch.setattr(updater.sys, "_MEIPASS", str(tmp_path / "bundle"), raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    bundled_core = tmp_path / "bundle" / "core"
+    bundled_core.mkdir(parents=True)
+    helper_source = Path(updater.__file__).resolve().with_name("uninstall_launcher.ps1")
+    (bundled_core / "uninstall_launcher.ps1").write_text(
+        helper_source.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    captured = {}
+    monkeypatch.setattr(
+        updater.subprocess, "Popen",
+        lambda command, **kwargs: captured.update(command=command, kwargs=kwargs) or object(),
+    )
+
+    result = updater.schedule_uninstall()
+    assert result["ok"] is True
+    assert "-UninstallerPath" in captured["command"]
+    assert str(install_dir / "unins000.exe") in captured["command"]
+    helper = Path(captured["command"][captured["command"].index("-File") + 1])
+    assert "User data" in helper.read_text(encoding="utf-8")

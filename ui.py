@@ -49,6 +49,9 @@ except Exception as _e:            # noqa: BLE001 - reported, never fatal
     HAVE_VIDEO = False
     print(f"[Video] playback unavailable ({_e}) — the HUD will not show video.")
 
+from core.app_paths import get_app_data_dir
+from core.media_sync import audio_sync_action
+
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QMainWindow, QPushButton, QScrollArea, QSizePolicy, QSplitter,
@@ -64,8 +67,8 @@ def _base_dir() -> Path:
     return Path(__file__).resolve().parent
 
 BASE_DIR   = _base_dir()
-CONFIG_DIR = BASE_DIR / "config"
-API_FILE   = CONFIG_DIR / "api_keys.json"
+CONFIG_DIR = BASE_DIR / "config"  # bundled, read-only UI assets
+API_FILE   = get_app_data_dir() / "config" / "api_keys.json"
 
 
 def _read_full_config() -> dict:
@@ -3084,6 +3087,7 @@ class MainWindow(QMainWindow):
 
         # Video surface shares the same central stack as the waveform and camera.
         self._video_split = False        # is the sound a separate stream?
+        self._video_sync_last_seek = 0.0
         self._video_auto_muted = False   # did ORI close the mic, or the user?
         # These plain flags are read from action worker threads. _video_on means
         # the video panel is open; _video_playback_confirmed changes only when
@@ -3422,6 +3426,10 @@ class MainWindow(QMainWindow):
         for p in (self._video_player, self._video_sound):
             if p:
                 try:
+                    p.setPlaybackRate(1.0)
+                except Exception:
+                    pass
+                try:
                     p.stop()
                 except Exception:
                     pass
@@ -3442,6 +3450,7 @@ class MainWindow(QMainWindow):
 
         self._video_title.setText(f"▶  {(title or 'VIDEO')[:44].upper()}")
         self._video_split = bool(audio_source)
+        self._video_sync_last_seek = 0.0
         self._set_video_muted(bool(muted))
 
         url = (QUrl.fromLocalFile(source) if Path(source).exists()
@@ -3490,6 +3499,12 @@ class MainWindow(QMainWindow):
 
     def _on_video_close(self) -> None:
         self._reset_video_players()
+        if self._video_sound:
+            try:
+                self._video_sound.setPlaybackRate(1.0)
+            except Exception:
+                pass
+        self._video_sync_last_seek = 0.0
         self._video_split = False
         self._video_on = False
         self._video_playback_confirmed = False
@@ -3537,22 +3552,30 @@ class MainWindow(QMainWindow):
             self._set_muted(False, "The video is quiet again.")
 
     def _sync_video_sound(self) -> None:
-        """Keep the separate soundtrack in step with the picture.
+        """Correct split-stream drift without seeking the soundtrack every second.
 
-        Two players started at the same moment do not stay together: they buffer
-        independently, and measured on a real stream they were about half a
-        second apart after nine seconds. So the sound is nudged back to the
-        picture whenever it drifts far enough to hear — and only then, because
-        correcting a smaller gap is itself audible.
+        Frequent setPosition() calls restart decoder buffers and can themselves
+        sound like skips. Small drift is corrected with a barely audible rate
+        adjustment; a large correction is rate-limited to one seek every four
+        seconds so a buffering stream cannot trigger repeated cuts.
         """
         if not (self._video_split and self._video_sound and self._video_player):
             return
         try:
-            if self._video_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+            playing = QMediaPlayer.PlaybackState.PlayingState
+            if (
+                self._video_player.playbackState() != playing
+                or self._video_sound.playbackState() != playing
+            ):
                 return
             drift = self._video_sound.position() - self._video_player.position()
-            if abs(drift) > 300:
+            rate, should_seek = audio_sync_action(drift)
+            self._video_sound.setPlaybackRate(rate)
+            now = time.monotonic()
+            if should_seek and now - self._video_sync_last_seek >= 8.0:
+                self._video_sound.setPlaybackRate(1.0)
                 self._video_sound.setPosition(self._video_player.position())
+                self._video_sync_last_seek = now
         except Exception:
             pass
 
@@ -4942,31 +4965,62 @@ class MainWindow(QMainWindow):
         about.addLayout(social_row)
 
         update_note = QLabel(
-            "SOFTWARE UPDATES · Check for a new ORI release. Downloads are verified before installation."
+            "SOFTWARE UPDATES · Each step is separate. Checking never downloads; "
+            "the installer is downloaded only when you press DOWNLOAD UPDATE."
         )
         update_note.setWordWrap(True)
         update_note.setFont(QFont(UI_FONT, 8))
         update_note.setStyleSheet(f"color: {C.ACC}; background: transparent;")
         about.addWidget(update_note)
-        self._app_update_status_lbl = QLabel("Update check has not been run.")
+        self._app_update_status_lbl = QLabel("Ready to check for an ORI update.")
         self._app_update_status_lbl.setWordWrap(True)
         self._app_update_status_lbl.setFont(QFont(UI_FONT, 8))
         self._app_update_status_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
         about.addWidget(self._app_update_status_lbl)
+
+        self._latest_update_info = None
+        self._staged_update = None
+        self._installed_setup_build = bool(
+            platform.system() == "Windows"
+            and getattr(sys, "frozen", False)
+            and (Path(sys.executable).resolve().parent / "unins000.exe").is_file()
+        )
         update_actions = QHBoxLayout()
         update_actions.setSpacing(8)
-        self._check_updates_btn = button("CHECK & UPDATE", True)
-        self._check_updates_btn.setToolTip(
-            "Check the latest release, download and verify it, then install and restart ORI."
-        )
+        self._check_updates_btn = button("CHECK FOR UPDATES", True)
+        self._check_updates_btn.setToolTip("Only checks GitHub. It does not download or install anything.")
         self._check_updates_btn.clicked.connect(self._check_app_updates)
+        self._download_update_btn = button("DOWNLOAD UPDATE")
+        self._download_update_btn.setEnabled(False)
+        self._download_update_btn.clicked.connect(self._download_checked_update)
+        self._install_update_btn = button("INSTALL UPDATE")
+        self._install_update_btn.setEnabled(False)
+        self._install_update_btn.clicked.connect(self._install_downloaded_update)
         update_actions.addWidget(self._check_updates_btn)
-        update_actions.addStretch(1)
+        update_actions.addWidget(self._download_update_btn)
+        update_actions.addWidget(self._install_update_btn)
         about.addLayout(update_actions)
 
         terms_button = button("TERMS & CONDITIONS")
         terms_button.clicked.connect(lambda: self._show_terms_dialog(_ORI_TERMS_TEXT))
         about.addWidget(terms_button, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        uninstall_note = QLabel(
+            "UNINSTALL ORI · Removes the application and its shortcuts from this Windows account. "
+            "Your API key, preferences and ORI memory are kept under LocalAppData so reinstalling "
+            "can restore them. Remove that personal data separately only when you no longer need it."
+        )
+        uninstall_note.setWordWrap(True)
+        uninstall_note.setFont(QFont(UI_FONT, 8))
+        uninstall_note.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+        about.addWidget(uninstall_note)
+        self._uninstall_ori_btn = button("UNINSTALL ORI")
+        self._uninstall_ori_btn.setEnabled(self._installed_setup_build)
+        self._uninstall_ori_btn.setToolTip(
+            "Available after installing ORI with the official Windows Setup installer."
+        )
+        self._uninstall_ori_btn.clicked.connect(self._uninstall_ori)
+        about.addWidget(self._uninstall_ori_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         about.addStretch(1)
         self._settings_stack.addWidget(p5)
 
@@ -5064,14 +5118,21 @@ class MainWindow(QMainWindow):
         return label
 
     def _check_app_updates(self) -> None:
-        """Run the complete check → download → verify → install update flow."""
-        button = getattr(self, "_check_updates_btn", None)
-        if button is not None:
-            button.setEnabled(False)
-            button.setText("CHECKING…")
+        """Stage one: check GitHub only. No package is downloaded here."""
+        self._latest_update_info = None
+        self._staged_update = None
+        if hasattr(self, "_check_updates_btn"):
+            self._check_updates_btn.setEnabled(False)
+            self._check_updates_btn.setText("CHECKING…")
+        if hasattr(self, "_download_update_btn"):
+            self._download_update_btn.setEnabled(False)
+            self._download_update_btn.setText("DOWNLOAD UPDATE")
+        if hasattr(self, "_install_update_btn"):
+            self._install_update_btn.setEnabled(False)
+            self._install_update_btn.setText("INSTALL UPDATE")
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
-                "Checking the official ORI release. No files will be changed unless a verified update is available."
+                "Checking the latest ORI release. This step does not download or install files."
             )
 
         def worker():
@@ -5104,35 +5165,52 @@ class MainWindow(QMainWindow):
 
         if not isinstance(data.get("asset"), dict) or not isinstance(data.get("checksum_asset"), dict):
             self._finish_update_flow(
-                "A newer release exists, but its Windows package or SHA-256 checksum is missing. "
-                "No update was downloaded or installed.",
-                success=False,
-            )
-            return
-
-        if platform.system() != "Windows" or not getattr(sys, "frozen", False):
-            self._finish_update_flow(
-                f"ORI {data.get('latest_version')} is available, but automatic installation "
-                "requires the packaged Windows application. This source build was left unchanged.",
+                "A newer release exists, but its ORI Setup installer or SHA-256 checksum is missing. "
+                "No files were downloaded.",
                 success=False,
             )
             return
 
         self._latest_update_info = data
         if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setText("DOWNLOADING…")
+            self._check_updates_btn.setEnabled(True)
+            self._check_updates_btn.setText("CHECK FOR UPDATES")
+        if hasattr(self, "_download_update_btn"):
+            self._download_update_btn.setEnabled(True)
+            self._download_update_btn.setText("DOWNLOAD UPDATE")
+        if hasattr(self, "_install_update_btn"):
+            self._install_update_btn.setEnabled(False)
+            self._install_update_btn.setText("INSTALL UPDATE")
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
-                f"ORI {data.get('latest_version')} is available. Downloading the release and "
-                "verifying its SHA-256 checksum…"
+                f"ORI {data.get('latest_version')} is available. Nothing has been downloaded. "
+                "Click DOWNLOAD UPDATE when you are ready."
             )
-        self._download_app_update(data)
+            self._app_update_status_lbl.setStyleSheet(
+                f"color: {C.ACC}; background: transparent;"
+            )
+
+    def _download_checked_update(self) -> None:
+        """Stage two: download the checked Setup executable only on user click."""
+        info = getattr(self, "_latest_update_info", None)
+        if not isinstance(info, dict):
+            self._finish_update_flow(
+                "Check for updates first. No download was started.", success=False
+            )
+            return
+        self._download_app_update(info)
 
     def _download_app_update(self, info: dict) -> None:
-        """Download and stage the already-checked release off the UI thread."""
-        if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setEnabled(False)
-            self._check_updates_btn.setText("DOWNLOADING…")
+        """Download and verify the already-checked installer off the UI thread."""
+        if hasattr(self, "_download_update_btn"):
+            self._download_update_btn.setEnabled(False)
+            self._download_update_btn.setText("DOWNLOADING…")
+        if hasattr(self, "_install_update_btn"):
+            self._install_update_btn.setEnabled(False)
+        if hasattr(self, "_app_update_status_lbl"):
+            self._app_update_status_lbl.setText(
+                f"Downloading ORI {info.get('latest_version')} Setup and checking SHA-256…"
+            )
 
         def worker():
             try:
@@ -5151,31 +5229,80 @@ class MainWindow(QMainWindow):
         data = result if isinstance(result, dict) else {
             "ok": False, "message": "Invalid update download response."
         }
-        if not data.get("ok") or not data.get("staged_dir"):
+        if not data.get("ok") or not data.get("installer_path"):
+            if hasattr(self, "_download_update_btn"):
+                self._download_update_btn.setEnabled(bool(self._latest_update_info))
+                self._download_update_btn.setText("DOWNLOAD UPDATE")
             self._finish_update_flow(
-                str(data.get("message") or "Update download or verification failed."),
+                str(data.get("message") or "Installer download or SHA-256 verification failed."),
                 success=False,
             )
             return
 
-        if platform.system() != "Windows" or not getattr(sys, "frozen", False):
-            self._finish_update_flow(
-                "The update package was verified, but this source build cannot replace itself. "
-                "The running application was left unchanged.",
-                success=False,
-            )
-            return
-
+        self._staged_update = data
+        if hasattr(self, "_download_update_btn"):
+            self._download_update_btn.setEnabled(False)
+            self._download_update_btn.setText("DOWNLOADED ✓")
+        if hasattr(self, "_install_update_btn"):
+            self._install_update_btn.setEnabled(bool(self._installed_setup_build))
         if hasattr(self, "_check_updates_btn"):
-            self._check_updates_btn.setText("INSTALLING…")
+            self._check_updates_btn.setEnabled(True)
+            self._check_updates_btn.setText("CHECK FOR UPDATES")
+
+        message = (
+            f"ORI {data.get('version') or 'update'} Setup downloaded and SHA-256 verified. "
+            "Click INSTALL UPDATE when you are ready."
+        )
+        if not self._installed_setup_build:
+            message += (
+                " Install ORI once with the official Setup first; in-app installation "
+                "is enabled for Setup-managed Windows installs."
+            )
+        if hasattr(self, "_app_update_status_lbl"):
+            self._app_update_status_lbl.setText(message)
+            self._app_update_status_lbl.setStyleSheet(
+                f"color: {C.GREEN if self._installed_setup_build else C.ACC}; background: transparent;"
+            )
+
+    def _install_downloaded_update(self) -> None:
+        """Stage three: ask, close ORI, run Setup and verify the new startup."""
+        data = getattr(self, "_staged_update", None)
+        if not isinstance(data, dict) or not data.get("installer_path"):
+            self._finish_update_flow(
+                "Download and verify an update before installing it.", success=False
+            )
+            return
+        if not self._installed_setup_build:
+            self._finish_update_flow(
+                "In-app installation is available after ORI has been installed with ORI-Setup.exe. "
+                "The verified installer is saved and the current application was not changed.",
+                success=False,
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Install ORI Update",
+            f"Install ORI {data.get('version') or 'update'} now?\n\n"
+            "ORI will close while the installer replaces the program files, then the updated "
+            "application will start automatically. Your API key, settings and memory are kept.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if hasattr(self, "_install_update_btn"):
+            self._install_update_btn.setEnabled(False)
+            self._install_update_btn.setText("STARTING INSTALLER…")
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
-                f"ORI {data.get('version') or 'update'} downloaded and SHA-256 verified. "
-                "Starting the Windows installer and preparing to restart…"
+                "Starting the verified Windows installer. ORI will close and the external "
+                "update helper will verify installation and restart."
             )
         try:
             from core.app_updater import schedule_windows_update
-            scheduled = schedule_windows_update(str(data["staged_dir"]))
+            scheduled = schedule_windows_update(str(data["installer_path"]))
             if not scheduled.get("ok"):
                 self._finish_update_flow(
                     str(scheduled.get("message") or "Could not start the update installer."),
@@ -5184,7 +5311,7 @@ class MainWindow(QMainWindow):
                 return
             if hasattr(self, "_app_update_status_lbl"):
                 self._app_update_status_lbl.setText(str(scheduled.get("message") or (
-                    "The verified update installer started. ORI will close and restart."
+                    "Update helper started. ORI will close and the installer will verify restart."
                 )))
             QApplication.quit()
         except Exception as exc:
@@ -5193,11 +5320,61 @@ class MainWindow(QMainWindow):
                 success=False,
             )
 
+    def _uninstall_ori(self) -> None:
+        """Open the registered ORI uninstaller after a clear data-retention notice."""
+        if not self._installed_setup_build:
+            QMessageBox.information(
+                self, "Uninstall ORI",
+                "This copy was not installed with ORI Setup. Install the official Windows "
+                "Setup package before using the in-app uninstall button.",
+            )
+            return
+        reply = QMessageBox.question(
+            self,
+            "Uninstall ORI",
+            "This removes ORI and its shortcuts from this Windows account.\n\n"
+            "Your API key, preferences and long-term memory will remain in "
+            "%LOCALAPPDATA%\\ORI, so reinstalling ORI can restore them. "
+            "The uninstall process does not erase that personal data.\n\n"
+            "Continue to the Windows uninstall wizard?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            from core.app_updater import schedule_uninstall
+            result = schedule_uninstall()
+            if not result.get("ok"):
+                QMessageBox.warning(
+                    self, "Uninstall ORI", str(result.get("message") or "Could not start the uninstaller.")
+                )
+                return
+            self._log_sig.emit(
+                "SYS: ORI uninstall wizard is starting. Personal data under LocalAppData\\ORI is being kept."
+            )
+            QApplication.quit()
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Uninstall ORI",
+                f"Could not start the uninstaller: {type(exc).__name__}: {exc}",
+            )
+
     def _finish_update_flow(self, message: str, *, success: bool) -> None:
-        button = getattr(self, "_check_updates_btn", None)
-        if button is not None:
-            button.setEnabled(True)
-            button.setText("CHECK & UPDATE")
+        check = getattr(self, "_check_updates_btn", None)
+        if check is not None:
+            check.setEnabled(True)
+            check.setText("CHECK FOR UPDATES")
+        download = getattr(self, "_download_update_btn", None)
+        if download is not None and not getattr(self, "_staged_update", None):
+            download.setEnabled(bool(getattr(self, "_latest_update_info", None)))
+            download.setText("DOWNLOAD UPDATE")
+        install = getattr(self, "_install_update_btn", None)
+        if install is not None:
+            install.setEnabled(bool(
+                getattr(self, "_staged_update", None) and self._installed_setup_build
+            ))
+            install.setText("INSTALL UPDATE")
         label = getattr(self, "_app_update_status_lbl", None)
         if label is not None:
             label.setText(str(message or "Update flow finished."))

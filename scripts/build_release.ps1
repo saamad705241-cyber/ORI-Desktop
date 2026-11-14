@@ -79,8 +79,13 @@ foreach ($asset in @("dashboard\static\app.html", "dashboard\static\login.html",
     throw "Build is missing required Phone Remote asset: $asset"
   }
 }
-if (!(Test-Path "dist\ORI\config")) { New-Item -ItemType Directory -Path "dist\ORI\config" | Out-Null }
-if (!(Test-Path "dist\ORI\config\api_keys.json")) {
-  Copy-Item "config\api_keys.example.json" "dist\ORI\config\api_keys.json"
+if (!(Test-Path "dist\ORI\config")) { throw "Packaged UI asset directory is missing." }
+foreach ($helper in @("core\install_update.ps1", "core\uninstall_launcher.ps1", "core\app_updater.py", "core\app_paths.py")) {
+  if (!(Test-Path (Join-Path "dist\ORI" $helper))) {
+    throw "Windows package is missing required installer/runtime file: $helper"
+  }
 }
-Write-Host "ORI Windows one-folder package built. User config is created from the example; no personal API key is bundled."
+if (Test-Path "dist\ORI\config\api_keys.json") {
+  throw "A live config file must never be included in the installer package."
+}
+Write-Host "ORI Windows one-folder payload built. Python and application dependencies are bundled; per-user config is created on first launch."

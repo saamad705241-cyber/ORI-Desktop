@@ -40,7 +40,12 @@ jobs:
       - name: Validate PowerShell updater scripts
         shell: pwsh
         run: |
-          $paths = @("core/apply_update.ps1", "scripts/bootstrap_update.ps1")
+          $paths = @(
+            "core/apply_update.ps1",
+            "core/install_update.ps1",
+            "core/uninstall_launcher.ps1",
+            "scripts/bootstrap_update.ps1"
+          )
           foreach ($path in $paths) {
             $tokens = $null
             $errors = $null
@@ -91,6 +96,9 @@ jobs:
           $required = @(
             "dist/ORI/ORI.exe",
             "dist/ORI/core/apply_update.ps1",
+            "dist/ORI/core/install_update.ps1",
+            "dist/ORI/core/uninstall_launcher.ps1",
+            "dist/ORI/core/app_paths.py",
             "dist/ORI/dashboard/static/app.html",
             "dist/ORI/dashboard/static/login.html",
             "dist/ORI/dashboard/static/crypto-js.js",
@@ -98,19 +106,66 @@ jobs:
             "dist/ORI/config/microphone-on.svg",
             "dist/ORI/config/microphone-muted.svg",
             "dist/ORI/config/voice-stop.svg",
+            "dist/ORI/config/api_keys.example.json",
             "dist/ORI/winrt/windows/foundation/__init__.py",
             "dist/ORI/winrt/windows/foundation/collections/__init__.py"
           )
           foreach ($path in $required) {
             if (!(Test-Path $path)) { throw "Windows package is missing required file: $path" }
           }
+          if (Test-Path "dist/ORI/config/api_keys.json") {
+            throw "The installer package must not contain a user API config."
+          }
           $env:ORI_PACKAGE_ROOT = (Resolve-Path "dist/ORI").Path
           python -I -c "import os, sys; root=os.environ['ORI_PACKAGE_ROOT']; os.add_dll_directory(root); sys.path.insert(0, root); import winrt.windows.foundation; import winrt.windows.foundation.collections; from winrt.windows.devices.geolocation import Geolocator; assert callable(Geolocator.request_access_async)"
           if ($LASTEXITCODE -ne 0) { throw "Frozen package WinRT location imports failed." }
-          Write-Host "Windows package, self-update helper, Phone Remote, WinRT location dependencies and microphone/voice assets verified."
+          choco install innosetup --yes --no-progress
+          $compiler = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$compiler) { throw "Inno Setup ISCC.exe was not found after installation." }
+          $version = (python -c "from ori_metadata import APP_VERSION; print(APP_VERSION)").Trim()
+          if ($LASTEXITCODE -ne 0 -or !$version) { throw "Could not read ORI APP_VERSION." }
+          & $compiler.FullName "/DMyAppVersion=$version" "installer\ORI.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+          $installer = "dist/installer/ORI-Setup-$version.exe"
+          if (!(Test-Path $installer)) { throw "ORI Setup.exe was not created: $installer" }
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ORI-Setup-$version.exe" | Set-Content -Encoding ascii "$installer.sha256"
+
+          # Exercise the real per-user Setup and uninstaller in this clean CI account.
+          $testInstall = Join-Path $env:RUNNER_TEMP "ORI Installer Smoke"
+          $userData = Join-Path $env:LOCALAPPDATA "ORI"
+          $sentinel = Join-Path $userData "memory\ci-uninstall-preservation.txt"
+          New-Item -ItemType Directory -Path (Split-Path -Parent $sentinel) -Force | Out-Null
+          "keep-user-data" | Set-Content -Encoding utf8 $sentinel
+          $setup = Start-Process -FilePath (Resolve-Path $installer).Path -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+            "/DIR=`"$testInstall`""
+          ) -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "ORI Setup exited with code $($setup.ExitCode)." }
+          foreach ($requiredFile in @("ORI.exe", "unins000.exe", "python312.dll")) {
+            if (!(Test-Path (Join-Path $testInstall $requiredFile))) {
+              throw "Installed ORI is missing required file: $requiredFile"
+            }
+          }
+          $uninstallEntry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -eq "ORI Personal AI Desktop Assistant" } |
+            Select-Object -First 1
+          if (!$uninstallEntry) { throw "ORI Windows uninstall entry was not registered." }
+          $uninstall = Start-Process -FilePath (Join-Path $testInstall "unins000.exe") -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          ) -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "ORI uninstaller exited with code $($uninstall.ExitCode)." }
+          if (Test-Path $testInstall) { throw "ORI program files remain after uninstall." }
+          if (!(Test-Path $sentinel)) { throw "ORI uninstall removed user data under LocalAppData." }
+          Remove-Item -LiteralPath $sentinel -Force
+          Write-Host "ORI $version Setup, bundled Python runtime, uninstall entry and data-preserving uninstall verified."
+
       - uses: actions/upload-artifact@v4
         with:
           name: ORI-Windows-Package-${{ github.sha }}
-          path: dist/ORI/
+          path: |
+            dist/ORI/
+            dist/installer/ORI-Setup-*.exe
+            dist/installer/ORI-Setup-*.exe.sha256
           if-no-files-found: error
           retention-days: 3

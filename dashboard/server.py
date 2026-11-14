@@ -19,6 +19,8 @@ import sys
 import time
 from pathlib import Path
 
+from core.app_paths import get_app_data_dir
+from ori_metadata import APP_VERSION
 from .remote_control import capture_desktop_jpeg, execute_pointer_action, validate_phone_screen_frame
 
 _DEPS_OK = False
@@ -69,7 +71,8 @@ def _resolve_static_dir() -> Path:
     return candidates[0]
 
 
-BASE_DIR    = _application_root()
+BASE_DIR    = _application_root()  # immutable bundled application assets
+APP_DATA_DIR = get_app_data_dir()  # writable per-user data, credentials and TLS keys
 STATIC_DIR  = _resolve_static_dir()
 _CRYPTOJS_FILE = STATIC_DIR / "crypto-js.js"
 PORT        = 8000
@@ -100,14 +103,14 @@ def _make_uploads_dir() -> Path:
     for candidate in [
         Path.home() / "Downloads" / "ORI Uploads",
         Path.home() / "Documents" / "ORI Uploads",
-        BASE_DIR / "uploads",
+        APP_DATA_DIR / "uploads",
     ]:
         try:
             candidate.mkdir(parents=True, exist_ok=True)
             return candidate
         except Exception:
             pass
-    return BASE_DIR / "uploads"
+    return APP_DATA_DIR / "uploads"
 
 
 UPLOADS_DIR = _make_uploads_dir()
@@ -115,7 +118,7 @@ UPLOADS_DIR = _make_uploads_dir()
 def _get_gemini_key() -> str | None:
     try:
         import json as _json
-        with open(BASE_DIR / "config" / "api_keys.json", "r", encoding="utf-8") as f:
+        with open(APP_DATA_DIR / "config" / "api_keys.json", "r", encoding="utf-8") as f:
             return _json.load(f).get("gemini_api_key")
     except Exception:
         return None
@@ -330,7 +333,7 @@ def _ensure_certs(lan_ip: str | None = None) -> bool:
     Returns True when a usable pair exists afterwards; False leaves the caller on
     plain HTTP, which still works — the QR code simply encodes http:// instead.
     """
-    certs = BASE_DIR / "config" / "certs"
+    certs = APP_DATA_DIR / "config" / "certs"
     key_p = certs / "jarvis.key"
     crt_p = certs / "jarvis.crt"
 
@@ -514,7 +517,7 @@ class DashboardServer:
 
     @staticmethod
     def _ssl_enabled() -> bool:
-        certs = BASE_DIR / "config" / "certs"
+        certs = APP_DATA_DIR / "config" / "certs"
         return (certs / "jarvis.key").exists() and (certs / "jarvis.crt").exists()
 
     @property
@@ -681,7 +684,7 @@ class DashboardServer:
             return JSONResponse({
                 "ok": True,
                 "app": "ORI",
-                "version": "3.5.0",
+                "version": APP_VERSION,
                 "dashboard": "ready",
                 "https": bool(self._use_ssl),
                 "port": int(self.port or 0),
@@ -1260,8 +1263,8 @@ class DashboardServer:
         """Optional second HTTPS entry point sharing the same app and in-memory state.
         Chrome HTTPS-upgrades any bare IP:PORT the user types, so this port also needs TLS.
         Manual entry uses the selected alias port when HTTPS certificates are enabled."""
-        ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
+        ssl_key  = APP_DATA_DIR / "config" / "certs" / "jarvis.key"
+        ssl_cert = APP_DATA_DIR / "config" / "certs" / "jarvis.crt"
         if not self.alias_port or self.alias_port == self.port:
             return
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, self.alias_port)
@@ -1297,8 +1300,8 @@ class DashboardServer:
         # Use the transport selected in __init__.  Re-checking the filesystem
         # here could otherwise disagree with a QR URL already handed to the UI.
         use_ssl  = self._use_ssl
-        ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
+        ssl_key  = APP_DATA_DIR / "config" / "certs" / "jarvis.key"
+        ssl_cert = APP_DATA_DIR / "config" / "certs" / "jarvis.crt"
 
         if use_ssl and self.alias_port and self.alias_port != self.port:
             asyncio.create_task(self._serve_alias())

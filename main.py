@@ -35,6 +35,7 @@ for _stream in ("stdout", "stderr"):
 # ─────────────────────────────────────────────────────────────────────────────
 
 import asyncio
+import os
 import re
 import threading
 import time
@@ -78,6 +79,8 @@ from memory.config_manager     import (
     get_wake_word_enabled, save_wake_word_enabled, get_input_device, get_output_device,
     get_voice_interrupt_enabled, save_voice_interrupt_enabled,
 )
+from core.app_paths            import get_app_data_dir
+from core.audio_stream         import collect_audio_batch
 from core                     import gemini as _gemini
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
@@ -101,7 +104,8 @@ def get_base_dir():
     return Path(__file__).resolve().parent
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+APP_DATA_DIR    = get_app_data_dir()
+API_CONFIG_PATH = APP_DATA_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
 # The conversation's model. A NAME, not a decision: the ladder lives in
 # core/gemini.py and this is only whichever rung is currently in use, kept here
@@ -505,6 +509,10 @@ class JarvisLive:
         self._barge_in_triggered   = False
         self._barge_in_last        = 0.0
         self._last_out_logged      = ""      # de-dupes a re-sent transcript tail
+        self._mic_queue_drops      = 0
+        self._last_mic_queue_warning = 0.0
+        self._audio_output_primed  = False
+        self._last_audio_warning   = 0.0
         # Push-to-talk
         self._ptt_enabled          = False
         self._ptt_held             = False
@@ -943,6 +951,7 @@ class JarvisLive:
         self._barge_audio_buffer.clear()
         self._tool_voice_buffer.clear()
         self._action_voice_run = 0
+        self._audio_output_primed = False
         q = self.audio_in_queue
         if q:
             drained = 0
@@ -1501,6 +1510,37 @@ class JarvisLive:
                     )
                 )
 
+    def _queue_live_mic_audio(self, data: bytes) -> None:
+        """Keep the newest mic audio without leaking QueueFull callback errors."""
+        queue = self.out_queue
+        if queue is None:
+            return
+        item = {"data": data, "mime_type": "audio/pcm"}
+        try:
+            queue.put_nowait(item)
+            return
+        except asyncio.QueueFull:
+            pass
+
+        # The network is behind. Drop the oldest buffered block, not the new
+        # speech, so ORI catches up instead of transcribing seconds-old audio.
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            queue.put_nowait(item)
+        except asyncio.QueueFull:
+            return
+        self._mic_queue_drops += 1
+        now = time.monotonic()
+        if now - self._last_mic_queue_warning >= 15.0:
+            self._last_mic_queue_warning = now
+            self.ui.write_log(
+                "SYS: Live audio input is arriving faster than the connection can send it. "
+                "Old buffered audio was discarded to keep the conversation responsive."
+            )
+
     async def _listen_audio(self):
         print("[ORI] 🎤 Mic started")
         loop = asyncio.get_event_loop()
@@ -1652,10 +1692,7 @@ class JarvisLive:
             
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
+                loop.call_soon_threadsafe(self._queue_live_mic_audio, data)
 
         try:
             def _open_mic(dev):
@@ -1924,20 +1961,27 @@ class JarvisLive:
                         self.set_speaking(False)
                         self.ui.set_access_indicator("speaker", False)
                         self._turn_done_event.clear()
+                        self._audio_output_primed = False
                     continue
 
                 self.set_speaking(True)
                 self.ui.set_access_indicator("speaker", True)
 
-                # Batch all immediately-available chunks into one write to reduce
-                # thread-pool round-trips (was one asyncio.to_thread per 50ms slice).
-                # Cap at ~200 ms so interrupt() still stops audio within ~200 ms.
-                batch = bytearray(chunk)
-                while len(batch) < 9600:   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
-                    try:
-                        batch.extend(self.audio_in_queue.get_nowait())
-                    except asyncio.QueueEmpty:
-                        break
+                # Give the Live stream a small, bounded jitter buffer. Its PCM
+                # arrives in ~50 ms slices; writing each immediately available
+                # slice on its own can leave the speaker with gaps between writes.
+                # Prime to ~200 ms once per response, then collect shorter batches
+                # while the previous write is being consumed by the device.
+                max_wait = 0.18 if not self._audio_output_primed else 0.07
+                if self._turn_done_event and self._turn_done_event.is_set():
+                    max_wait = 0.0
+                batch = await collect_audio_batch(
+                    self.audio_in_queue,
+                    chunk,
+                    target_bytes=9600,
+                    max_wait_seconds=max_wait,
+                )
+                self._audio_output_primed = True
 
                 # Feed the same waveform from the actual PCM being sent to speakers.
                 # The HUD uses a loudness envelope to animate the signal waveform.
@@ -1958,7 +2002,30 @@ class JarvisLive:
                     pass
 
                 try:
-                    await asyncio.to_thread(stream.write, bytes(batch))
+                    await asyncio.to_thread(stream.write, batch)
+                except sd.PortAudioError as exc:
+                    now = time.monotonic()
+                    detail = str(exc)
+                    if now - self._last_audio_warning >= 15.0:
+                        self._last_audio_warning = now
+                        self.ui.write_log(
+                            f"SYS: Speaker output reported an audio-buffer/device error: {detail[:180]}"
+                        )
+                    if "underflow" in detail.lower() or getattr(exc, "code", None) == -9980:
+                        # PortAudio can report a buffer underflow while keeping
+                        # the output stream usable. Continue receiving audio;
+                        # do not tear down the whole Gemini Live session.
+                        continue
+                    try:
+                        stream.stop()
+                        stream.close()
+                    except Exception:
+                        pass
+                    try:
+                        stream = _open_spk(_spk_dev)
+                    except Exception:
+                        stream = _open_spk(None)
+                    await asyncio.to_thread(stream.write, batch)
                 except (RuntimeError, asyncio.CancelledError):
                     break   # executor shutting down — exit cleanly
         except Exception as e:
@@ -2424,8 +2491,9 @@ class JarvisLive:
                 ):
                     self.session          = session
                     self.audio_in_queue   = asyncio.Queue()
-                    self.out_queue        = asyncio.Queue(maxsize=200)
+                    self.out_queue        = asyncio.Queue(maxsize=80)
                     self._turn_done_event = asyncio.Event()
+                    self._audio_output_primed = False
 
                     # Reset transient state that must not carry over from a previous session
                     self._pending_vision       = None
@@ -2665,7 +2733,7 @@ def _ensure_first_run_config() -> None:
         "wake_word_enabled": False,
         "push_to_talk_enabled": False,
         "voice_interrupt_enabled": True,
-        "github_repository": "",
+        "github_repository": "saamad705241-cyber/ORI-Desktop",
     }
     API_CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -2679,6 +2747,26 @@ def _selected_runtime_mode() -> str:
     selects the tool-enabled cloud runtime as its active path.
     """
     return "cloud"
+
+
+def _mark_update_startup_ready() -> None:
+    """Acknowledge that the freshly installed GUI has reached its event loop."""
+    prefix = "--ori-update-token="
+    token = next(
+        (arg[len(prefix):] for arg in sys.argv if arg.startswith(prefix)),
+        "",
+    )
+    if not token or not re.fullmatch(r"[a-fA-F0-9]{32}", token):
+        return
+    try:
+        ready = APP_DATA_DIR / "updates" / "startup" / f"{token}.ready"
+        ready.parent.mkdir(parents=True, exist_ok=True)
+        ready.write_text(
+            json.dumps({"pid": os.getpid(), "ready_at": datetime.now().isoformat()}),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        print(f"[ORI] Update startup marker could not be written: {type(exc).__name__}: {exc}")
 
 
 def main():
@@ -2703,6 +2791,7 @@ def main():
             ui.write_log("ERR: " + message)
 
     threading.Thread(target=runner, daemon=True, name="ori-runtime").start()
+    threading.Timer(1.0, _mark_update_startup_ready).start()
     ui.root.mainloop()
 
 if __name__ == "__main__":

@@ -1,18 +1,17 @@
-# ORI 3.5.4 — Personal AI Desktop Assistant
+# ORI 3.6.0 — Personal AI Desktop Assistant
 
 ORI is a Windows-first, voice-first desktop assistant built around Google Gemini Live, a dynamic action registry, local memory, Windows/browser automation and an optional paired-phone dashboard. The main interface remains a minimal dark terminal with a thin green audio signal; capabilities are invoked through natural language rather than a visible feature dashboard.
 
-## Windows quick start
+## Windows installation
 
-1. Install Python 3.12 or 3.13 and the Python launcher.
-2. Extract this project to a short, writable path such as `C:\ORI`.
-3. Run `setup.bat` once. It creates `.venv` and installs the dependencies.
-4. Run `run.bat`.
-5. On first launch, choose Continue as Guest, set optional profile preferences and enter a Google AI Studio API key.
+1. Download the versioned `ORI-Setup-x.y.z.exe` from the official GitHub Release.
+2. Run Setup. It installs ORI into your Windows user profile and offers an optional Desktop shortcut. No Python, Java or Node.js installation is required.
+3. Launch ORI from the Start Menu or Desktop shortcut.
+4. On first launch, choose Continue as Guest, set optional profile preferences and enter your AI connection key.
 
-The normal setup intentionally skips Playwright's large browser binaries. If a browser automation workflow specifically needs them, run `scripts\install_browser_runtime.bat` once.
+The installer bundles the Python runtime and the application packages collected for the Windows build. Windows itself still provides hardware drivers and OS components. Optional browser binaries and local speech/model add-ons may remain feature-specific requirements.
 
-Get a Gemini API key from https://aistudio.google.com/app/apikey. Keep `config/api_keys.json` private.
+Get your AI connection key from the provider's official setup page. ORI stores it in `%LOCALAPPDATA%\ORI\config\api_keys.json`, not in the program installation folder.
 
 ## Current integrated capabilities
 
@@ -26,7 +25,7 @@ Get a Gemini API key from https://aistudio.google.com/app/apikey. Keep `config/a
 - Windows/browser/file/media actions where their dependencies and permissions are available.
 - QR-paired phone dashboard on a trusted private LAN: touchpad, keyboard, media/volume, local file transfer, PC screen view and phone-screen frame intake for Gemini analysis.
 - Local memory, profile preferences, CPU/RAM/temperature monitoring, and system status reporting.
-- GitHub release checker and SHA-256 verified Windows package downloads. Automatic replacement is restricted to packaged one-folder Windows builds.
+- GitHub release checker with separate Check, Download and Install stages for SHA-256 verified Setup installers. The detached updater verifies startup and supports rollback.
 
 Features remain dependent on OS version, permissions, installed components, hardware drivers, Gemini availability and network access. An unavailable sensor or action is reported as unavailable; ORI must not claim success without a verified result.
 
@@ -51,15 +50,15 @@ Say that ORI should keep watching/monitoring your screen. ORI starts a backgroun
 
 ORI does not silently change a Windows network from Public to Private and does not open public internet ports. Use a trusted LAN only. Do not expose the remote dashboard directly to the public internet.
 
-## Repository and updates
+## Updates and uninstall
 
-- Configure `github_repository` in your private `config/api_keys.json` as `OWNER/REPOSITORY` after creating the official GitHub repository.
-- `.github/workflows/ci.yml` runs tests, source compilation, Ruff correctness checks and Gitleaks.
-- Push a matching tag such as `v3.5.0` to trigger `.github/workflows/release.yml`.
-- The release workflow publishes a Windows one-folder ZIP and a `.sha256` checksum asset.
-- In Settings → About, Check for Updates reads the latest GitHub release. Downloaded packages must pass SHA-256 verification. Source/development installs are never overwritten automatically.
+- Configure `github_repository` in your private ORI config as `OWNER/REPOSITORY`.
+- In Settings → About, press **Check for Updates**. This checks GitHub only.
+- Press **Download Update** to download the matching `ORI-Setup-x.y.z.exe` and SHA-256 sidecar. ORI verifies the checksum before enabling installation.
+- Press **Install Update** and confirm. ORI closes; a detached helper runs Setup, checks the updated application startup marker and restores the previous program if the update fails.
+- Settings → About → **Uninstall ORI** opens the Windows uninstall wizard after explaining what is removed. API keys, preferences and long-term memory are intentionally retained under `%LOCALAPPDATA%\ORI`.
 
-See `docs/RELEASE_AND_UPDATES.md` and `scripts/initialize_repository.bat`.
+See `docs/INSTALLER_AND_UPDATES.md` and `docs/RELEASE_AND_UPDATES.md`.
 
 ## Development checks
 
@@ -68,7 +67,7 @@ python -m pytest -q
 python -m ruff check --select F main.py ui.py core actions memory dashboard tests
 ```
 
-Run `build_windows_exe.bat` to create a local one-folder package after dependencies are installed. Verify `dist\ORI\ORI.exe` on Windows before sharing it.
+Run `scripts\build_release.ps1` to create the one-folder payload, then compile `installer\ORI.iss` with Inno Setup to create the user-facing installer. Verify the complete install, update and uninstall cycle on a clean Windows account before sharing it.
 
 ## Security and privacy
 
