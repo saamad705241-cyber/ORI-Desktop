@@ -2596,6 +2596,10 @@ class JarvisLive:
                     continue
 
                 err_str = str(e)
+                log_diagnostic(
+                    f"Live session failure; reconnecting: {type(e).__name__}: {err_str}",
+                    exc_info=(type(e), e, e.__traceback__),
+                )
                 print(f"[ORI] Error ({type(e).__name__}): {e}")
                 traceback.print_exc()
 
