@@ -293,7 +293,7 @@ def schedule_windows_update(
     installer = Path(installer_path).expanduser().resolve()
     setup_match = _SETUP_RE.fullmatch(installer.name)
     target_version = str(expected_version or (setup_match.group(1) if setup_match else "")).strip()
-    if not re.fullmatch(r"\\d+\\.\\d+\\.\\d+", target_version):
+    if not re.fullmatch(r"\d+\.\d+\.\d+", target_version):
         return {
             "ok": False,
             "message": "The downloaded installer does not contain a valid target ORI version.",
