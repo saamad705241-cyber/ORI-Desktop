@@ -256,3 +256,20 @@ def test_schedule_uninstall_uses_detached_user_visible_uninstaller(monkeypatch, 
     assert str(install_dir / "unins000.exe") in captured["command"]
     helper = Path(captured["command"][captured["command"].index("-File") + 1])
     assert "User data" in helper.read_text(encoding="utf-8")
+
+
+def test_update_check_detects_patch_release_after_360(monkeypatch):
+    payload = _release_payload()
+    payload["tag_name"] = "v3.6.1"
+    payload["assets"] = [
+        {"name": "ORI-Setup-3.6.1.exe", "browser_download_url": "https://example.test/ORI-Setup-3.6.1.exe"},
+        {"name": "ORI-Setup-3.6.1.exe.sha256", "browser_download_url": "https://example.test/ORI-Setup-3.6.1.exe.sha256"},
+    ]
+    monkeypatch.setattr(updater.requests, "get", lambda *_a, **_k: FakeResponse(payload=payload))
+
+    result = updater.check_for_updates(repo="saamad705241-cyber/ORI-Desktop", current_version="3.6.0")
+
+    assert result["ok"] is True
+    assert result["update_available"] is True
+    assert result["latest_version"] == "3.6.1"
+    assert result["asset"]["name"] == "ORI-Setup-3.6.1.exe"
