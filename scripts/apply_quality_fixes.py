@@ -650,6 +650,15 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
     assert open_app._normalize("chat gpt") == "https://chatgpt.com"
 ''')
 
+    # The source test still hard-codes an obsolete installer version in its CI contract.
+    # Keep the assertion tied to the installer naming scheme, not one historical release.
+    replace_once(
+        source / "tests" / "test_installer_contract.py",
+        'assert "ORI-Setup-3.6.0.exe" in workflow',
+        'assert "ORI-Setup-" in workflow',
+        label="refresh installer workflow contract",
+    )
+
     print(f"Applied ORI 3.6.6 quality fixes to {source}")
 
 
