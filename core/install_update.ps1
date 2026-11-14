@@ -39,6 +39,18 @@ try {
     if (!(Test-Path -LiteralPath (Join-Path $InstallDir "unins000.exe") -PathType Leaf)) {
         throw "This copy is not registered as an installed ORI setup. Run ORI-Setup.exe once before using in-app updates."
     }
+    $previousUninstallEntry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -eq "ORI Personal AI Desktop Assistant" } |
+        Select-Object -First 1
+    if (!$previousUninstallEntry) {
+        throw "The previous ORI Windows uninstall registration could not be found; update was not started."
+    }
+    $previousUninstallKey = [string]$previousUninstallEntry.PSPath
+    $previousRegisteredVersion = [string]$previousUninstallEntry.DisplayVersion
+    if ([string]::IsNullOrWhiteSpace($previousUninstallKey) -or [string]::IsNullOrWhiteSpace($previousRegisteredVersion)) {
+        throw "The previous ORI Windows uninstall registration is incomplete; update was not started."
+    }
+    Write-Output "Previous Windows registration captured: ORI $previousRegisteredVersion."
 
     Write-Output "Waiting up to 120 seconds for ORI PID $AppPid to exit."
     if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) {
@@ -117,6 +129,11 @@ try {
         }
         Start-Sleep -Seconds 1
     }
+    $newProcess.Refresh()
+    if ($newProcess.HasExited -or !(Get-Process -Id $newProcess.Id -ErrorAction SilentlyContinue)) {
+        throw "Updated ORI exited at the end of the 15-second post-start stability check."
+    }
+    Write-Output "Final process-liveness check passed after the full 15-second stability window."
     Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
     Write-Output "UPDATE SUCCESS. ORI $ExpectedVersion installed and relaunched from the registered install directory (PID $($newProcess.Id))."
 }
@@ -131,8 +148,10 @@ catch {
         try {
             Write-Output "Restoring the previous installed program files."
             Invoke-RobocopyChecked -From $RollbackDir -To $InstallDir -Mirror
+            Set-ItemProperty -LiteralPath $previousUninstallKey -Name DisplayVersion -Value $previousRegisteredVersion
+            Write-Output "Restored Windows uninstall DisplayVersion to $previousRegisteredVersion."
             Start-Process -FilePath $installExe -WorkingDirectory $InstallDir | Out-Null
-            Write-Output "ROLLBACK SUCCESS. Previous ORI was restored and launched."
+            Write-Output "ROLLBACK SUCCESS. Previous ORI files and Windows version registration were restored and launched."
         }
         catch {
             Write-Output "ROLLBACK FAILED: $($_.Exception.Message)"
