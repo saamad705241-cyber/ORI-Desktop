@@ -39,6 +39,10 @@ def test_update_helper_runs_setup_and_requires_startup_marker_before_success():
     assert "15-second post-start stability check" in source
     assert "[switch]$NoDialog" in source
     assert "if (!$NoDialog)" in source
+    assert "$newProcess.Refresh()" in source
+    assert "at the end of the 15-second post-start stability check" in source
+    assert "$previousRegisteredVersion" in source
+    assert "Set-ItemProperty -LiteralPath $previousUninstallKey -Name DisplayVersion" in source
 
 
 def test_uninstaller_launcher_preserves_personal_data_folder():
@@ -56,14 +60,15 @@ def test_user_data_paths_are_outside_the_install_directory_for_frozen_builds():
     assert '"memory" / "long_term.json"' in source
 
 
-def test_ci_exercises_a_real_in_place_upgrade_from_published_360():
+def test_ci_exercises_a_real_in_place_upgrade_from_published_362():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert "ORI-Setup-3.6.0.exe" in workflow
+    assert "ORI-Setup-3.6.2.exe" in workflow
     assert "core/install_update.ps1" in workflow
     assert "UPDATE SUCCESS" in workflow
     assert "-ExpectedVersion $version" in workflow
     assert "DisplayVersion" in workflow
     assert "ci-update-preservation.txt" in workflow
+    assert "3.6.2 -> $version" in workflow
 
 
 
@@ -71,3 +76,16 @@ def test_update_startup_marker_reports_version_and_executable_identity():
     source = (ROOT / "main.py").read_text(encoding="utf-8")
     assert '"version": APP_VERSION' in source
     assert '"executable": os.path.normcase(os.path.abspath(sys.executable))' in source
+
+
+
+def test_settings_uses_one_progressive_update_button():
+    source = (ROOT / "ui.py").read_text(encoding="utf-8")
+    assert 'self._update_action_btn = button("CHECK FOR UPDATES", True)' in source
+    assert 'self._update_action_btn.clicked.connect(self._handle_update_action)' in source
+    assert '"download": "DOWNLOAD UPDATE"' in source
+    assert '"install": "INSTALL & RESTART"' in source
+    assert "def _handle_update_action(self)" in source
+    assert "_check_updates_btn" not in source
+    assert "_download_update_btn" not in source
+    assert "_install_update_btn" not in source
