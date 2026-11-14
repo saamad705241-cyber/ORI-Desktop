@@ -50,6 +50,7 @@ except Exception as _e:            # noqa: BLE001 - reported, never fatal
     print(f"[Video] playback unavailable ({_e}) — the HUD will not show video.")
 
 from core.app_paths import get_app_data_dir
+from core.crash_diagnostics import log_diagnostic
 from core.media_sync import audio_sync_action
 
 from PyQt6.QtWidgets import (
@@ -3157,14 +3158,19 @@ class MainWindow(QMainWindow):
             )
             _vid_v.addWidget(self._video_widget, stretch=1)
 
-            self._video_audio = QAudioOutput()
+            # Parent every native multimedia object to the window so Qt owns
+            # their lifetime explicitly. This avoids orphaned platform-backend
+            # objects when a stream is replaced or the HUD is closed.
+            self._video_audio = QAudioOutput(self)
             self._video_audio.setMuted(True)
-            self._video_player = QMediaPlayer()
+            self._video_player = QMediaPlayer(self)
             self._video_player.setVideoOutput(self._video_item)
             # Keep the picture filling the view as the window is resized.
             self._video_item.nativeSizeChanged.connect(self._fit_video)
             self._video_player.setAudioOutput(self._video_audio)
-            self._video_player.errorOccurred.connect(self._on_video_error)
+            self._video_player.errorOccurred.connect(
+                lambda error, message: self._on_video_error("video", error, message)
+            )
             self._video_player.playbackStateChanged.connect(self._on_video_playback_state_changed)
 
             # A SECOND player, for sound that arrives separately.
@@ -3178,11 +3184,13 @@ class MainWindow(QMainWindow):
             #
             # A local file or a direct video URL still uses the first player
             # alone: one stream, one player, nothing to synchronise.
-            self._video_sound = QMediaPlayer()
-            self._video_sound_out = QAudioOutput()
+            self._video_sound = QMediaPlayer(self)
+            self._video_sound_out = QAudioOutput(self)
             self._video_sound_out.setMuted(True)
             self._video_sound.setAudioOutput(self._video_sound_out)
-            self._video_sound.errorOccurred.connect(self._on_video_error)
+            self._video_sound.errorOccurred.connect(
+                lambda error, message: self._on_video_error("audio", error, message)
+            )
 
             self._video_sync = QTimer(self)
             self._video_sync.setInterval(1000)
@@ -3589,22 +3597,21 @@ class MainWindow(QMainWindow):
         if out:
             self._set_video_muted(not out.isMuted())
 
-    def _on_video_error(self, *_a) -> None:
-        err = ""
-        try:
-            errs = []
-            if self._video_player:
-                e = self._video_player.errorString()
-                if e:
-                    errs.append(e)
-            if self._video_sound:
-                e = self._video_sound.errorString()
-                if e and e not in errs:
-                    errs.append(e)
-            err = " | ".join(errs)
-        except Exception:
-            pass
-        self.write_log(f"SYS: The video could not be played{(' — ' + err) if err else ''}.")
+    def _on_video_error(self, stream: str, error, error_string: str = "") -> None:
+        """Report which Qt media stream failed before safely releasing playback."""
+        error_name = getattr(error, "name", str(error))
+        details = str(error_string or "").strip()
+        if not details:
+            try:
+                player = self._video_sound if stream == "audio" else self._video_player
+                details = player.errorString() if player else ""
+            except Exception:
+                details = ""
+        message = f"Qt Multimedia {stream} stream error ({error_name})"
+        if details:
+            message += f": {details[:500]}"
+        log_diagnostic(message)
+        self.write_log(f"SYS: The video could not be played — {message}.")
         self._on_video_close()
 
     def stop_video(self) -> None:

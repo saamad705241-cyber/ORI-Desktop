@@ -80,6 +80,7 @@ from memory.config_manager     import (
     get_voice_interrupt_enabled, save_voice_interrupt_enabled,
 )
 from core.app_paths            import get_app_data_dir
+from core.crash_diagnostics    import install_crash_diagnostics, log_diagnostic
 from core.audio_stream         import collect_audio_batch
 from core                     import gemini as _gemini
 from core.plugin_loader        import discover_plugins
@@ -674,6 +675,7 @@ class JarvisLive:
         self._awake = False
         self.set_speaking(False)
         self.ui.set_state("SLEEPING")
+        log_diagnostic(f"Wake-word sleep transition: {reason}")
         self.ui.write_log(f"SYS: Sleeping — {reason}. Say 'Hey Jarvis' to wake me.")
 
     async def _run_sleep_watch(self) -> None:
@@ -2594,6 +2596,10 @@ class JarvisLive:
                     continue
 
                 err_str = str(e)
+                log_diagnostic(
+                    f"Live session failure; reconnecting: {type(e).__name__}: {err_str}",
+                    exc_info=(type(e), e, e.__traceback__),
+                )
                 print(f"[ORI] Error ({type(e).__name__}): {e}")
                 traceback.print_exc()
 
@@ -2770,6 +2776,10 @@ def _mark_update_startup_ready() -> None:
 
 
 def main():
+    # Keep a durable local record of Python/thread failures and fatal native
+    # exceptions. This is especially useful for Qt Multimedia driver crashes,
+    # which may close the process without reaching the normal UI error handler.
+    install_crash_diagnostics(APP_DATA_DIR / "logs")
     _ensure_first_run_config()
     ui = JarvisUI()  # The central HUD is a waveform-only audio signal display.
 
@@ -2787,6 +2797,7 @@ def main():
             print("\n🔴 Shutting down...")
         except Exception as exc:
             message = f"Startup failed: {type(exc).__name__}: {exc}"
+            log_diagnostic(message, exc_info=sys.exc_info())
             print(message)
             ui.write_log("ERR: " + message)
 

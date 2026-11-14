@@ -97,6 +97,71 @@ def _local_path(text: str) -> str:
     return ""
 
 
+
+_MAX_VIDEO_HEIGHT = 1080
+
+
+def _format_height(fmt: dict) -> int:
+    try:
+        return max(0, int(fmt.get("height") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _best_video_format(candidates: list[dict]) -> dict | None:
+    """Choose the sharpest stream for a 1080p desktop, with codec-safe ties.
+
+    Prefer the highest available resolution up to 1080p. If a source exposes
+    only larger streams, choose the smallest one above the target rather than
+    unnecessarily decoding 4K on modest hardware. At equal resolution prefer
+    H.264/AVC and MP4, which have broad Windows hardware-decoder support.
+    """
+    candidates = [fmt for fmt in candidates if isinstance(fmt, dict)]
+    if not candidates:
+        return None
+
+    within_target = [
+        fmt for fmt in candidates
+        if 0 < _format_height(fmt) <= _MAX_VIDEO_HEIGHT
+    ]
+    if within_target:
+        candidates = within_target
+    else:
+        known_heights = [_format_height(fmt) for fmt in candidates if _format_height(fmt) > 0]
+        if known_heights:
+            lowest_above_target = min(known_heights)
+            candidates = [
+                fmt for fmt in candidates
+                if _format_height(fmt) == lowest_above_target
+            ]
+
+    def score(fmt: dict) -> tuple:
+        codec = str(fmt.get("vcodec") or "").lower()
+        if "avc1" in codec or "h264" in codec:
+            codec_priority = 2
+        elif "vp9" in codec or "vp09" in codec:
+            codec_priority = 1
+        else:
+            codec_priority = 0
+        try:
+            fps = float(fmt.get("fps") or 0)
+        except (TypeError, ValueError):
+            fps = 0.0
+        try:
+            bitrate = float(fmt.get("tbr") or 0)
+        except (TypeError, ValueError):
+            bitrate = 0.0
+        return (
+            _format_height(fmt),
+            codec_priority,
+            int(str(fmt.get("ext") or "").lower() == "mp4"),
+            fps,
+            bitrate,
+        )
+
+    return max(candidates, key=score)
+
+
 def _resolve_youtube(url_or_query: str) -> tuple[str, str, str, str]:
     """(video_url, audio_url, title, error). Needs yt-dlp; says so when absent.
 
@@ -139,51 +204,43 @@ def _resolve_youtube(url_or_query: str) -> tuple[str, str, str, str]:
     def has(f, key):
         return f.get(key) not in (None, "none")
 
-    def best(candidates):
-        """Highest quality — but the ORIGINAL language before quality.
-
-        YouTube auto-dubs a lot of videos now, and it offers every dub as its
-        own audio stream at the SAME bitrate as the original: measured on one
-        video, English original at 129.483 and Arabic, Bangla, German, Spanish,
-        French, Hindi and Indonesian all at 129.482. Choosing on bitrate alone
-        therefore came down to a thousandth of a kilobit, and a video would play
-        in Arabic one time and English the next for no reason the user could
-        see.
-
-        YouTube marks the original track with language_preference 10 and every
-        dub with -1, so that decides it first and bitrate only breaks ties
-        within the same track. Video formats carry no language, so this is the
-        same ordering for them with the first term always equal.
-        """
+    # Keep the original-language preference for sound tracks, but select
+    # picture formats by actual resolution first. The previous 720p ceiling
+    # forced HD sources down to 720p and made videos look visibly soft.
+    def best_audio(candidates):
         if not candidates:
             return None
-        return max(candidates,
-                   key=lambda f: (f.get("language_preference") or 0,
-                                  f.get("tbr") or 0))
+        return max(
+            candidates,
+            key=lambda f: (
+                f.get("language_preference") or 0,
+                f.get("abr") or f.get("tbr") or 0,
+            ),
+        )
 
-    # Combined first — if a video still has one, one player is simpler and
-    # cannot drift. Then picture and sound separately.
-    combined = best([f for f in formats if has(f, "vcodec") and has(f, "acodec")])
-    if combined:
+    combined = _best_video_format([
+        f for f in formats if has(f, "vcodec") and has(f, "acodec")
+    ])
+    video = _best_video_format([
+        f for f in formats if has(f, "vcodec") and not has(f, "acodec")
+    ])
+
+    # Prefer one combined stream when it offers the same or better resolution:
+    # one decoder is more reliable and cannot drift against a second player.
+    if combined and (video is None or _format_height(combined) >= _format_height(video)):
         return combined["url"], "", info.get("title") or "", ""
 
-    # 720p is the ceiling on purpose: the HUD panel is nowhere near 4K, and a
-    # smaller stream starts sooner and drifts less.
-    video = best([f for f in formats
-                  if has(f, "vcodec") and not has(f, "acodec")
-                  and f.get("ext") == "mp4" and (f.get("height") or 0) <= 720])
-    if not video:
-        video = best([f for f in formats
-                      if has(f, "vcodec") and not has(f, "acodec")])
-    audio = best([f for f in formats
-                  if has(f, "acodec") and not has(f, "vcodec")
-                  and f.get("ext") == "m4a"])
+    audio = best_audio([
+        f for f in formats if has(f, "acodec") and not has(f, "vcodec")
+        and f.get("ext") == "m4a"
+    ])
     if not audio:
-        audio = best([f for f in formats
-                      if has(f, "acodec") and not has(f, "vcodec")])
+        audio = best_audio([
+            f for f in formats if has(f, "acodec") and not has(f, "vcodec")
+        ])
 
     if not video:
-        return "", "", "", "no playable stream was offered for that video."
+        return "", "", "", "no playable video stream was offered for that video."
     if audio and audio.get("language"):
         print(f"[Video] audio track: {audio.get('language')} "
               f"({audio.get('format_note') or audio.get('format_id')})")
