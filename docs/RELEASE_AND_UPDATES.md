@@ -23,13 +23,13 @@ For every bug-fix update that is ready to publish, bump `APP_VERSION` in the sam
 3. The PR is merged into `main`.
 4. The release workflow reads `APP_VERSION`, compares it to the latest GitHub Release and does nothing if the version has not increased.
 5. When the version is newer, GitHub Actions verifies the source again, builds the Windows one-folder app, wraps it in the per-user Inno Setup installer, and publishes `ORI-Setup-<version>.exe` plus its `.sha256` sidecar as release/tag `v<version>`.
-6. The installed ORI updater checks release metadata, downloads the Setup executable and checksum only after the user requests it, verifies SHA-256, and installs/restarts only after the user confirms.
+6. The installed ORI updater uses one progressive button: Check for Updates → Download Update → Install & Restart. Downloads occur only after the user's click; SHA-256 is verified before installation is offered.
 
 A normal merge that does not bump the version must not publish another release. Failed tests must never publish a release.
 
 ## User's part
 
-For an already installed packaged ORI, the user does not need to download the repository or manually upload files. Setup-managed ORI 3.6.2 and later use the version-verified About & Updates flow. Users on 3.6.0 or 3.6.1 must run the current official Setup manually once because those builds contain the older bundled update helper. The updater requires internet access. Source/development runs do not automatically replace their own files.
+For an already installed packaged ORI, the user does not need to download the repository or manually upload files. Setup-managed ORI 3.6.3 and later use the single progressive About & Updates button. Users on 3.6.0 or 3.6.1 should install the official 3.6.2-or-later Setup manually once to bootstrap the version-aware updater. The updater requires internet access. Source/development runs do not automatically replace their own files.
 
 ## CI and release workflow
 
@@ -49,18 +49,18 @@ For an already installed packaged ORI, the user does not need to download the re
 
 The installed Settings page exposes three separate actions:
 
-1. **Check for Updates** requests GitHub's latest-release metadata only. It does not download or install anything.
-2. **Download Update** downloads the versioned Setup EXE and matching SHA-256 sidecar into `%LOCALAPPDATA%/ORI/updates/<version>`, then verifies the digest. A mismatch discards the installer.
-3. **Install Update** is enabled only after a verified download. After explicit user confirmation, a detached PowerShell helper waits for ORI to close, backs up the program directory, runs the Setup EXE in the existing install location, launches the new ORI with a one-time startup token, and waits for the new process to remain alive. A failed install/startup restores the previous program files.
+1. The one Settings button starts as **Check for Updates** and queries GitHub metadata without downloading.
+2. When a release is available, it changes to **Download Update**. The click downloads the versioned Setup EXE and SHA-256 sidecar into `%LOCALAPPDATA%/ORI/updates/<version>`; a mismatch discards the installer.
+3. After verification, the same button changes to **Install & Restart**. Following confirmation, the detached helper verifies the exact installed version and process liveness. If the install fails, it restores previous program files and the previous Windows uninstall version registration.
 
 Personal settings, API credentials, memory, logs and downloads live outside the program directory and must remain intact through update and uninstall. Helper transcripts are stored under `%LOCALAPPDATA%/ORI/updates/install-helper`.
 
-The in-app update requires a Setup-managed Windows installation. Portable ZIP builds must install the official Setup once before they can use the staged updater. Setup-managed 3.6.0 and 3.6.1 builds must also install the current Setup manually once to replace their older bundled updater helper.
+The in-app update requires a Setup-managed Windows installation. Portable ZIP builds must install the official Setup once before they can use the staged updater. Setup-managed 3.6.0 and 3.6.1 builds must install the official 3.6.2-or-later Setup manually once to replace their older bundled updater helper.
 
 ## CI and release verification
 
 - `.github/workflows/ci.yml` runs source compilation, pytest, Ruff and Gitleaks.
-- The Windows package job builds the single Setup EXE, verifies its bundled runtime, tests a clean install/uninstall, and exercises an in-place upgrade from the published v3.6.0 Setup to the newly built candidate. The upgrade test checks startup acknowledgement, the installed version and preservation of user data.
+- The Windows package job builds the single Setup EXE, verifies its bundled runtime, tests a clean install/uninstall, and exercises an in-place upgrade from the published v3.6.2 Setup to the newly built candidate. The upgrade test checks startup acknowledgement, the installed version and preservation of user data.
 - `.github/workflows/release.yml` publishes a stable release only after tests pass and only when `APP_VERSION` is newer than the latest stable release.
 
 ## Legacy portable builds
