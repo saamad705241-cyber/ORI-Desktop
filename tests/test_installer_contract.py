@@ -33,6 +33,10 @@ def test_update_helper_runs_setup_and_requires_startup_marker_before_success():
     assert "UPDATE SUCCESS" in source
     assert "ROLLBACK SUCCESS" in source
     assert "startup" in source
+    assert "$ExpectedVersion" in source
+    assert "$startup.version" in source
+    assert "$startup.executable" in source
+    assert "15-second post-start stability check" in source
 
 
 def test_uninstaller_launcher_preserves_personal_data_folder():
@@ -55,5 +59,13 @@ def test_ci_exercises_a_real_in_place_upgrade_from_published_360():
     assert "ORI-Setup-3.6.0.exe" in workflow
     assert "core/install_update.ps1" in workflow
     assert "UPDATE SUCCESS" in workflow
+    assert "-ExpectedVersion $version" in workflow
     assert "DisplayVersion" in workflow
     assert "ci-update-preservation.txt" in workflow
+
+
+
+def test_update_startup_marker_reports_version_and_executable_identity():
+    source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert '"version": APP_VERSION' in source
+    assert '"executable": os.path.normcase(os.path.abspath(sys.executable))' in source
