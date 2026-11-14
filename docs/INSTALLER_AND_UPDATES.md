@@ -19,15 +19,15 @@ The application migrates existing portable config and memory once, without overw
 
 ## In-app update flow
 
-1. **Check for Updates** only queries the latest GitHub release. It never downloads.
-2. **Download Update** downloads the matching `ORI-Setup-x.y.z.exe` and SHA-256 sidecar only after the user clicks. The checksum is verified before the download is offered for installation.
-3. **Install Update** asks before closing ORI, then starts a detached PowerShell helper. The helper waits for ORI to exit, backs up the current program files, runs the verified installer silently in the same install directory, launches the new ORI, and waits for a startup-ready marker plus a short stability period. A failed install/startup restores the previous program folder.
+1. The single **Check for Updates** button queries the latest GitHub release only. It never downloads.
+2. If a newer release exists, that same button changes to **Download Update**. Clicking it downloads the matching `ORI-Setup-x.y.z.exe` and SHA-256 sidecar, then verifies the checksum.
+3. After verification, the same button changes to **Install & Restart**. After confirmation, a detached PowerShell helper waits for ORI to exit, backs up the program files and previous Windows version registration, runs the verified installer silently in the same install directory, launches the new ORI, and verifies its exact version, executable path and continued process liveness. Failure restores the previous program files and Windows version registration.
 
 The helper, transcript and rollback data are kept under `%LOCALAPPDATA%\ORI\updates`, outside the directory being replaced.
 
 ## One-time bootstrap for older installed versions
 
-ORI 3.6.0 and 3.6.1 contain the earlier updater helper. Install the current official Setup manually once to receive the version-aware updater in ORI 3.6.2. After that one-time step, future updates use the in-app flow. Portable ZIP builds also require one manual Setup installation.
+ORI 3.6.0 and 3.6.1 contain the older updater helper. Install the official ORI 3.6.2 or later Setup manually once to enable in-app updates. Portable ZIP builds also require one manual Setup installation. After bootstrap, later releases can be installed from the single progressive in-app update button.
 
 ## Validation required for a public release
 
