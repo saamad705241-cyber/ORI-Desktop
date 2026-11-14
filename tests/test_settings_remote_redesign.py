@@ -33,7 +33,7 @@ class SettingsRemoteRedesignTests(unittest.TestCase):
         self.assertIn('button("UNINSTALL ORI")', section)
         self.assertIn("Your API key, preferences and ORI memory are kept", section)
         self.assertIn('"download": "DOWNLOAD UPDATE"', source)
-        self.assertIn('"install": "INSTALL & RESTART"', source)
+        self.assertIn('"install": "OPEN UPDATE ASSISTANT"', source)
         check_method = source.split("    def _apply_app_update_check(", 1)[1].split(
             "    def _download_checked_update(", 1
         )[0]
