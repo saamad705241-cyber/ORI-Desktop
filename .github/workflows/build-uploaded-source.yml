@@ -1,0 +1,162 @@
+name: Build ORI Installer from Uploaded Source ZIP
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ORI365_SAFE.zip"
+      - ".github/workflows/build-uploaded-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ori-source-zip-installer
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Extract the uploaded ORI 3.6.5 source ZIP
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:GITHUB_WORKSPACE "ORI365_SAFE.zip"
+          if (!(Test-Path -LiteralPath $archive -PathType Leaf)) {
+            throw "ORI365_SAFE.zip was not found in the repository root."
+          }
+          $destination = Join-Path $env:RUNNER_TEMP "ori-source"
+          if (Test-Path -LiteralPath $destination) {
+            Remove-Item -LiteralPath $destination -Recurse -Force
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          $source = Join-Path $destination "ORI-3.6.5-Source-Publishing-SAFE"
+          if (!(Test-Path (Join-Path $source "ori_metadata.py"))) {
+            throw "The uploaded ZIP does not contain the expected ORI source root."
+          }
+          $version = (& python -c "import ast,pathlib; t=ast.parse(pathlib.Path(r'$source/ori_metadata.py').read_text(encoding='utf-8')); print(next(n.value.value for n in t.body if isinstance(n,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='APP_VERSION' for x in n.targets)))").Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.5") {
+            throw "Expected source version 3.6.5, found '$version'."
+          }
+          $updater = Get-Content -LiteralPath (Join-Path $source "core/app_updater.py") -Raw
+          if ($updater -notmatch 'DEFAULT_REPOSITORY\s*=\s*"saamad705241-cyber/ORI-Desktop"') {
+            throw "The in-app updater is not configured for the official ORI-Desktop repository."
+          }
+          "ORI_SOURCE=$source" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Validated uploaded ORI source version $version at $source"
+
+      - name: Install project and test dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller pytest ruff
+
+      - name: Compile sources and run automated tests
+        shell: pwsh
+        run: |
+          python scripts/compile_sources.py
+          if ($LASTEXITCODE -ne 0) { throw "Python source compilation failed." }
+          python -m pytest -q
+          if ($LASTEXITCODE -ne 0) { throw "ORI automated tests failed." }
+          python -m ruff check --select F821,F822,F823,F811 main.py ui.py core actions memory dashboard tests
+          if ($LASTEXITCODE -ne 0) { throw "ORI Ruff correctness checks failed." }
+
+      - name: Build bundled Windows application
+        shell: pwsh
+        run: |
+          ./scripts/build_release.ps1
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller Windows bundle build failed." }
+          foreach ($file in @("dist/ORI/ORI.exe", "dist/ORI/python312.dll", "dist/ORI/core/app_updater.py", "dist/ORI/core/update_assistant.ps1", "dist/ORI/core/install_update.ps1")) {
+            if (!(Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Packaged application is missing required file: $file"
+            }
+          }
+          if (Test-Path "dist/ORI/config/api_keys.json") {
+            throw "A private API configuration must not be included in the installer."
+          }
+
+      - name: Install Inno Setup and compile final installer
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Could not install Inno Setup on the Windows runner." }
+          $compiler = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$compiler) { throw "Inno Setup compiler ISCC.exe was not found." }
+          & $compiler.FullName "/DMyAppVersion=3.6.5" "installer\ORI.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installer compilation failed." }
+          $installer = "dist/installer/ORI-Setup-3.6.5.exe"
+          if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Final ORI Setup EXE was not created." }
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ORI-Setup-3.6.5.exe" | Set-Content -Encoding ascii "dist/installer/ORI-Setup-3.6.5.exe.sha256"
+          Write-Host "Created final self-contained ORI-Setup-3.6.5.exe and SHA-256 file."
+
+      - name: Smoke-test the installer on Windows
+        shell: pwsh
+        run: |
+          $installer = (Resolve-Path "dist/installer/ORI-Setup-3.6.5.exe").Path
+          $testDir = Join-Path $env:RUNNER_TEMP "ORI-3.6.5-Installer-Smoke"
+          $install = Start-Process -FilePath $installer -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+            "/DIR=`"$testDir`""
+          ) -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer smoke test exited with code $($install.ExitCode)." }
+          foreach ($name in @("ORI.exe", "python312.dll", "unins000.exe")) {
+            if (!(Test-Path (Join-Path $testDir $name))) { throw "Installed app is missing $name." }
+          }
+          $uninstall = Start-Process -FilePath (Join-Path $testDir "unins000.exe") -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          ) -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Installer smoke-test uninstall exited with code $($uninstall.ExitCode)." }
+          if (Test-Path $testDir) { throw "Installer smoke-test files remain after uninstall." }
+          Write-Host "Installer install/uninstall smoke test passed."
+
+      - name: Prepare release assets
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE "release-artifacts"
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:ORI_SOURCE "dist/installer/ORI-Setup-3.6.5.exe") -Destination $out
+          Copy-Item -LiteralPath (Join-Path $env:ORI_SOURCE "dist/installer/ORI-Setup-3.6.5.exe.sha256") -Destination $out
+
+      - name: Upload installer build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORI-3.6.5-Windows-Installer
+          path: release-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish ORI v3.6.5 GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.6.5
+          target_commitish: ${{ github.sha }}
+          name: ORI v3.6.5
+          body: |
+            Windows installer built directly from the uploaded ORI 3.6.5 source archive.
+
+            The Setup bundles the Python runtime and application dependencies. Users do not need to install Python, Java, or Node.js separately.
+
+            Includes the in-app GitHub updater, SHA-256 verification, visible Update Assistant, post-install launch verification, and rollback helper.
+          make_latest: true
+          prerelease: false
+          draft: false
+          fail_on_unmatched_files: true
+          files: |
+            release-artifacts/ORI-Setup-3.6.5.exe
+            release-artifacts/ORI-Setup-3.6.5.exe.sha256
