@@ -16,4 +16,4 @@ def test_release_workflow_builds_setup_and_sha256_for_the_committed_app_version(
     source = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     assert 'python -c "from ori_metadata import APP_VERSION; print(APP_VERSION)"' in source
     assert '"/DMyAppVersion=$env:ORI_VERSION"' in source
-    assert 'ORI-Setup-\${{ needs.verify.outputs.app_version }}.exe.sha256' in source
+    assert 'ORI-Setup-${{ needs.verify.outputs.app_version }}.exe.sha256' in source
