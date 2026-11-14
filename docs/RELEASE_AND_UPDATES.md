@@ -22,8 +22,8 @@ For every bug-fix update that is ready to publish, bump `APP_VERSION` in the sam
 2. A PR is tested: compile, pytest, Ruff, Gitleaks and the Windows package smoke test.
 3. The PR is merged into `main`.
 4. The release workflow reads `APP_VERSION`, compares it to the latest GitHub Release and does nothing if the version has not increased.
-5. When the version is newer, GitHub Actions verifies the source again, builds the Windows one-folder app, creates `ORI-<version>-Windows.zip` and its SHA-256 sidecar, and publishes a release/tag `v<version>`.
-6. The existing ORI updater checks the latest GitHub Release, downloads the ZIP and checksum, verifies SHA-256, stages the update and installs/restarts the packaged Windows build.
+5. When the version is newer, GitHub Actions verifies the source again, builds the Windows one-folder app, wraps it in the per-user Inno Setup installer, and publishes `ORI-Setup-<version>.exe` plus its `.sha256` sidecar as release/tag `v<version>`.
+6. The installed ORI updater checks release metadata, downloads the Setup executable and checksum only after the user requests it, verifies SHA-256, and installs/restarts only after the user confirms.
 
 A normal merge that does not bump the version must not publish another release. Failed tests must never publish a release.
 
@@ -45,10 +45,23 @@ For an already installed packaged ORI, the user does not need to download the re
 - Verify third-party license and redistribution terms before public binary distribution.
 
 
-## Windows self-update installation helper
+## In-app update stages
 
-The packaged update installer is copied to `%LOCALAPPDATA%/ORI/updates/install-helper` before ORI exits. It writes a transcript log there, waits up to 120 seconds for the current process to close, backs up the existing program files, copies the staged package while excluding user-data folders and `api_keys.json`, compares the staged and installed `ORI.exe` SHA-256 values, and starts the new executable. If copying, verification or immediate startup fails, it attempts to restore and restart the previous build. The UI reports the log path; a completed download or a started helper is not itself reported as a completed installation.
+The installed Settings page exposes three separate actions:
 
+1. **Check for Updates** requests GitHub's latest-release metadata only. It does not download or install anything.
+2. **Download Update** downloads the versioned Setup EXE and matching SHA-256 sidecar into `%LOCALAPPDATA%/ORI/updates/<version>`, then verifies the digest. A mismatch discards the installer.
+3. **Install Update** is enabled only after a verified download. After explicit user confirmation, a detached PowerShell helper waits for ORI to close, backs up the program directory, runs the Setup EXE in the existing install location, launches the new ORI with a one-time startup token, and waits for the new process to remain alive. A failed install/startup restores the previous program files.
+
+Personal settings, API credentials, memory, logs and downloads live outside the program directory and must remain intact through update and uninstall. Helper transcripts are stored under `%LOCALAPPDATA%/ORI/updates/install-helper`.
+
+The in-app update requires a Setup-managed Windows installation. Portable ZIP builds must install the official Setup once before they can use the staged updater.
+
+## CI and release verification
+
+- `.github/workflows/ci.yml` runs source compilation, pytest, Ruff and Gitleaks.
+- The Windows package job builds the single Setup EXE, verifies its bundled runtime, tests a clean install/uninstall, and exercises an in-place upgrade from the published v3.6.0 Setup to the newly built candidate. The upgrade test checks startup acknowledgement, the installed version and preservation of user data.
+- `.github/workflows/release.yml` publishes a stable release only after tests pass and only when `APP_VERSION` is newer than the latest stable release.
 
 ## One-time bootstrap for legacy 3.5.0 / 3.5.1 installs
 
