@@ -48,8 +48,99 @@ jobs:
           if ($appVersion -notmatch '^\d+\.\d+\.\d+$') {
             throw "APP_VERSION must use stable SemVer MAJOR.MINOR.PATCH. Found: $appVersion"
           }
-          if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}$') {
+          if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}
+            Accept = "application/vnd.github+json"
+            Authorization = "Bearer $env:GH_TOKEN"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $latestVersion = "0.0.0"
+          $releaseUrl = "https://api.github.com/repos/${{ github.repository }}/releases/latest"
+          try {
+            $latestRelease = Invoke-RestMethod -Uri $releaseUrl -Headers $headers -Method Get
+            $latestTag = [string]$latestRelease.tag_name
+            $latestVersion = $latestTag.TrimStart('v', 'V')
+          } catch {
+            $statusCode = 0
+            try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
+            if ($statusCode -ne 404) { throw }
+          }
+
+          if ($latestVersion -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Latest GitHub release tag is not a stable SemVer version: $latestVersion"
+          }
+
+          $shouldPublish = ([version]$appVersion -gt [version]$latestVersion)
+          "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_needed=$($shouldPublish.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "source_sha=$env:SOURCE_SHA" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "App version: $appVersion; latest published version: $latestVersion; source: $env:SOURCE_SHA; publish: $shouldPublish"
+
+  windows-release:
+    needs: verify
+    if: needs.verify.outputs.release_needed == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.source_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies, packager and Inno Setup
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+          choco install innosetup --yes --no-progress
+      - name: Build one-folder Windows payload
+        shell: pwsh
+        run: ./scripts/build_release.ps1
+      - name: Compile the per-user Windows Setup installer
+        shell: pwsh
+        env:
+          ORI_VERSION: ${{ needs.verify.outputs.app_version }}
+        run: |
+          $compiler = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (!$compiler) { throw "Inno Setup ISCC.exe was not found." }
+          & $compiler.FullName "/DMyAppVersion=$env:ORI_VERSION" "installer\ORI.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+          $installer = "dist/installer/ORI-Setup-$env:ORI_VERSION.exe"
+          if (!(Test-Path $installer)) { throw "Setup installer was not created: $installer" }
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ORI-Setup-$env:ORI_VERSION.exe" | Set-Content -Encoding ascii "$installer.sha256"
+          Write-Host "Created $installer and its SHA-256 sidecar."
+      - name: Publish versioned GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.verify.outputs.app_version }}
+          target_commitish: ${{ needs.verify.outputs.source_sha }}
+          name: ORI v${{ needs.verify.outputs.app_version }}
+          make_latest: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/installer/ORI-Setup-${{ needs.verify.outputs.app_version }}.exe
+            dist/installer/ORI-Setup-${{ needs.verify.outputs.app_version }}.exe.sha256
+) {
             throw "The successful ORI CI run did not provide a valid source commit SHA."
+          }
+
+          # A delayed workflow_run must never publish an older commit after main has moved.
+          $branchUrl = "https://api.github.com/repos/\${{ github.repository }}/branches/main"
+          $mainBranch = Invoke-RestMethod -Uri $branchUrl -Headers @{
+            Accept = "application/vnd.github+json"
+            Authorization = "Bearer $env:GH_TOKEN"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          } -Method Get
+          $currentMainSha = [string]$mainBranch.commit.sha
+          if ($currentMainSha -ne $env:SOURCE_SHA) {
+            "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "release_needed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "source_sha=$env:SOURCE_SHA" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "Skipping stale release candidate $env:SOURCE_SHA; current main is $currentMainSha."
+            exit 0
           }
 
           $headers = @{
