@@ -1,23 +1,27 @@
 name: Build ORI Windows Release
 
 on:
-  push:
+  workflow_run:
+    workflows: ["ORI CI"]
+    types: [completed]
     branches: [main]
-    tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   verify:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: windows-latest
     timeout-minutes: 35
     outputs:
       app_version: ${{ steps.release_gate.outputs.app_version }}
       release_needed: ${{ steps.release_gate.outputs.release_needed }}
+      source_sha: ${{ steps.release_gate.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -27,7 +31,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pytest ruff
-      - name: Compile source and run tests
+      - name: Compile source and run release checks
         run: |
           python scripts/compile_sources.py
           python -m pytest -q
@@ -37,18 +41,15 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           $appVersion = (python -c "from ori_metadata import APP_VERSION; print(APP_VERSION)").Trim()
           if ($LASTEXITCODE -ne 0) { throw "Could not read APP_VERSION from ori_metadata.py." }
           if ($appVersion -notmatch '^\d+\.\d+\.\d+$') {
             throw "APP_VERSION must use stable SemVer MAJOR.MINOR.PATCH. Found: $appVersion"
           }
-
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $tagVersion = "${{ github.ref_name }}".TrimStart('v', 'V')
-            if ($tagVersion -ne $appVersion) {
-              throw "Git tag version $tagVersion does not match APP_VERSION $appVersion."
-            }
+          if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw "The successful ORI CI run did not provide a valid source commit SHA."
           }
 
           $headers = @{
@@ -75,7 +76,8 @@ jobs:
           $shouldPublish = ([version]$appVersion -gt [version]$latestVersion)
           "app_version=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "release_needed=$($shouldPublish.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "App version: $appVersion; latest published version: $latestVersion; publish: $shouldPublish"
+          "source_sha=$env:SOURCE_SHA" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "App version: $appVersion; latest published version: $latestVersion; source: $env:SOURCE_SHA; publish: $shouldPublish"
 
   windows-release:
     needs: verify
@@ -84,6 +86,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.source_sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -115,7 +119,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.verify.outputs.app_version }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ needs.verify.outputs.source_sha }}
           name: ORI v${{ needs.verify.outputs.app_version }}
           make_latest: true
           generate_release_notes: true
