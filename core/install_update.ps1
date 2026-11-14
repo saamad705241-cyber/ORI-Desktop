@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory = $true)][string]$InstallDir,
     [Parameter(Mandatory = $true)][string]$ExpectedVersion,
     [Parameter(Mandatory = $true)][string]$LogPath,
-    [Parameter(Mandatory = $true)][string]$RollbackDir
+    [Parameter(Mandatory = $true)][string]$RollbackDir,
+    [switch]$NoDialog
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -137,16 +138,21 @@ catch {
             Write-Output "ROLLBACK FAILED: $($_.Exception.Message)"
         }
     }
-    try {
-        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
-        [System.Windows.Forms.MessageBox]::Show(
-            "ORI $ExpectedVersion could not be installed and verified.`r`n`r`nThe previous build was restored when possible.`r`n`r`nReason: $failure`r`n`r`nPlease share this log with the developer:`r`n$LogPath",
-            "ORI update could not be completed",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Warning
-        ) | Out-Null
+    if (!$NoDialog) {
+        try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+            [System.Windows.Forms.MessageBox]::Show(
+                "ORI $ExpectedVersion could not be installed and verified.`r`n`r`nThe previous build was restored when possible.`r`n`r`nReason: $failure`r`n`r`nPlease share this log with the developer:`r`n$LogPath",
+                "ORI update could not be completed",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+        }
+        catch { Write-Output "Could not display update failure details: $($_.Exception.Message)" }
     }
-    catch { Write-Output "Could not display update failure details: $($_.Exception.Message)" }
+    else {
+        Write-Output "Update failure dialog suppressed by the automated test runner."
+    }
     exit 1
 }
 finally {
