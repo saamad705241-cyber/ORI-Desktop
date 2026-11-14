@@ -201,6 +201,8 @@ def test_schedule_windows_update_launches_logged_setup_helper(monkeypatch, tmp_p
     assert "-File" in command
     assert "-InstallerPath" in command
     assert "-InstallDir" in command
+    assert "-ExpectedVersion" in command
+    assert command[command.index("-ExpectedVersion") + 1] == "3.6.0"
     assert str(installer) in command
     helper_path = Path(command[command.index("-File") + 1])
     script = helper_path.read_text(encoding="utf-8")
@@ -273,3 +275,21 @@ def test_update_check_detects_patch_release_after_360(monkeypatch):
     assert result["update_available"] is True
     assert result["latest_version"] == "3.6.1"
     assert result["asset"]["name"] == "ORI-Setup-3.6.1.exe"
+
+
+
+def test_schedule_windows_update_rejects_target_version_mismatch(monkeypatch, tmp_path):
+    install_dir = tmp_path / "installed"
+    install_dir.mkdir()
+    (install_dir / "ORI.exe").write_bytes(b"old-installed-build")
+    (install_dir / "unins000.exe").write_bytes(b"Inno uninstaller")
+    installer = tmp_path / "ORI-Setup-3.6.1.exe"
+    installer.write_bytes(b"verified-setup")
+    monkeypatch.setattr(updater, "platform_name", lambda: "Windows")
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updater.sys, "executable", str(install_dir / "ORI.exe"), raising=False)
+
+    result = updater.schedule_windows_update(str(installer), expected_version="3.6.2")
+
+    assert result["ok"] is False
+    assert "does not match" in result["message"]
