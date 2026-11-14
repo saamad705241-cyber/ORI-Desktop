@@ -99,6 +99,7 @@ jobs:
             "dist/ORI/core/install_update.ps1",
             "dist/ORI/core/uninstall_launcher.ps1",
             "dist/ORI/core/app_paths.py",
+            "dist/ORI/core/crash_diagnostics.py",
             "dist/ORI/dashboard/static/app.html",
             "dist/ORI/dashboard/static/login.html",
             "dist/ORI/dashboard/static/crypto-js.js",
