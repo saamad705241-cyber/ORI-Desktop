@@ -1,0 +1,55 @@
+name: Audit ORI 3.6.5 Source Modules
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-source-for-audit:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract safe ORI source archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dest = Join-Path $env:RUNNER_TEMP "ori-audit-source"
+          Expand-Archive -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "ORI365_SAFE.zip") -DestinationPath $dest -Force
+          $source = Join-Path $dest "ORI-3.6.5-Source-Publishing-SAFE"
+          if (!(Test-Path (Join-Path $source "ori_metadata.py"))) {
+            throw "ORI source root not found in uploaded archive."
+          }
+          $version = (python -c "import ast,pathlib; t=ast.parse(pathlib.Path(r'$source/ori_metadata.py').read_text(encoding='utf-8')); print(next(n.value.value for n in t.body if isinstance(n,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='APP_VERSION' for x in n.targets)))").Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.5") { throw "Unexpected source version: $version" }
+          $out = Join-Path $env:RUNNER_TEMP "ori-source-audit"
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          foreach ($name in @("actions","core","tests","plugins","dashboard","memory","scripts","config")) {
+            $p = Join-Path $source $name
+            if (Test-Path $p) { Copy-Item $p -Destination $out -Recurse -Force }
+          }
+          foreach ($name in @("main.py","ui.py","ori_metadata.py","requirements.txt","pyproject.toml","ORI.spec","ori.spec")) {
+            $p = Join-Path $source $name
+            if (Test-Path $p -PathType Leaf) { Copy-Item $p -Destination $out -Force }
+          }
+          $apiKeys = Join-Path $out "config/api_keys.json"
+          if (Test-Path $apiKeys) { Remove-Item $apiKeys -Force }
+          Write-Host "Exporting ORI $version source modules for targeted debugging."
+          "ORI_SOURCE_AUDIT=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload source audit bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ori-3.6.5-source-audit
+          path: ${{ runner.temp }}/ori-source-audit
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
