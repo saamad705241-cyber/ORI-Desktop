@@ -47,6 +47,18 @@ jobs:
           if (!(Test-Path (Join-Path $source "ori_metadata.py"))) {
             throw "The uploaded ZIP does not contain the expected ORI source root."
           }
+          # Apply a reviewed one-line correctness fix from the uploaded source:
+          # _run_proactive_mode must obtain its running event loop locally.
+          $mainPath = Join-Path $source "main.py"
+          $mainText = [System.IO.File]::ReadAllText($mainPath)
+          $oldCode = "monitors     = await loop.run_in_executor(self._tool_executor, list_monitors)"
+          $newCode = "monitors     = await asyncio.get_running_loop().run_in_executor(self._tool_executor, list_monitors)"
+          if (!$mainText.Contains($oldCode)) {
+            throw "Expected proactive-mode loop reference was not found; refusing to patch an unknown source version."
+          }
+          $mainText = $mainText.Replace($oldCode, $newCode)
+          [System.IO.File]::WriteAllText($mainPath, $mainText, [System.Text.UTF8Encoding]::new($false))
+          Write-Host "Applied proactive-mode event loop correction to the extracted source."
           $version = (& python -c "import ast,pathlib; t=ast.parse(pathlib.Path(r'$source/ori_metadata.py').read_text(encoding='utf-8')); print(next(n.value.value for n in t.body if isinstance(n,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='APP_VERSION' for x in n.targets)))").Trim()
           if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.5") {
             throw "Expected source version 3.6.5, found '$version'."
@@ -168,6 +180,8 @@ jobs:
             The Setup bundles the Python runtime and application dependencies. Users do not need to install Python, Java, or Node.js separately.
 
             Includes the in-app GitHub updater, SHA-256 verification, visible Update Assistant, post-install launch verification, and rollback helper.
+
+            Build applies a reviewed proactive-mode event-loop correctness fix before tests and packaging.
           make_latest: true
           prerelease: false
           draft: false
