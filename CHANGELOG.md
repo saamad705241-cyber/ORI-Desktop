@@ -1,5 +1,13 @@
 # ORI Changelog
 
+## 3.6.3 (14 November 2026)
+
+- Replace three separate update buttons with one progressive Settings action: Check for Updates → Download Update → Install & Restart.
+- Keep each stage explicit: checking reads GitHub release metadata only; downloading occurs only after a click and verifies the installer SHA-256 before installation is offered.
+- Strengthen the Windows update helper with a final post-stability process-liveness check and restore the previous Windows uninstall DisplayVersion during rollback.
+- Update Windows CI to exercise an in-place upgrade from the published ORI 3.6.2 Setup to the candidate release.
+
+
 ## 3.6.2 (14 November 2026)
 
 - Require the update helper to verify the exact target version, Windows uninstall registration, startup-token PID, executable path and reported application version before confirming an update.
