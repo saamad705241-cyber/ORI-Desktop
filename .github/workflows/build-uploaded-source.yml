@@ -43,7 +43,7 @@ jobs:
             Remove-Item -LiteralPath $destination -Recurse -Force
           }
           Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
-          $source = Join-Path $destination "ORI-3.6.6-Source-Publishing-SAFE"
+          $source = Join-Path $destination "ORI-3.6.5-Source-Publishing-SAFE"
           if (!(Test-Path (Join-Path $source "ori_metadata.py"))) {
             throw "The uploaded ZIP does not contain the expected ORI source root."
           }
@@ -79,7 +79,7 @@ jobs:
 
       - name: Confirm extracted source is the build source
         shell: pwsh
-        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.6-Source-Publishing-SAFE
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         run: |
           $version = (python -c "from ori_metadata import APP_VERSION; print(APP_VERSION)").Trim()
           if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.6") {
@@ -89,7 +89,7 @@ jobs:
 
       - name: Install project and test dependencies
         shell: pwsh
-        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.6-Source-Publishing-SAFE
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
@@ -97,7 +97,7 @@ jobs:
 
       - name: Compile sources and run automated tests
         shell: pwsh
-        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.6-Source-Publishing-SAFE
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         run: |
           python scripts/compile_sources.py
           if ($LASTEXITCODE -ne 0) { throw "Python source compilation failed." }
@@ -108,7 +108,7 @@ jobs:
 
       - name: Build bundled Windows application
         shell: pwsh
-        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.6-Source-Publishing-SAFE
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         run: |
           ./scripts/build_release.ps1
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller Windows bundle build failed." }
@@ -123,7 +123,7 @@ jobs:
 
       - name: Install Inno Setup and compile final installer
         shell: pwsh
-        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.6-Source-Publishing-SAFE
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         run: |
           choco install innosetup --yes --no-progress
           if ($LASTEXITCODE -ne 0) { throw "Could not install Inno Setup on the Windows runner." }
@@ -139,7 +139,7 @@ jobs:
 
       - name: Smoke-test the installer on Windows
         shell: pwsh
-        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.6-Source-Publishing-SAFE
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         run: |
           $installer = (Resolve-Path "dist/installer/ORI-Setup-3.6.6.exe").Path
           $testDir = Join-Path $env:RUNNER_TEMP "ORI-3.6.6-Installer-Smoke"
