@@ -174,17 +174,20 @@ from core.voice_leveler        import VoiceLeveler''',
                             pass
                         try:
                             stream = _open_spk(_spk_dev)
-                        except Exception:
-                            stream = _open_spk(None)
-                        try:
                             await asyncio.get_running_loop().run_in_executor(
                                 self._audio_executor, stream.write, batch
                             )
                         except Exception as retry_exc:
-                            self.ui.write_log(
-                                f"SYS: Speaker recovery could not replay one audio batch: "
-                                f"{type(retry_exc).__name__}. Continuing with the next chunk."
-                            )
+                            try:
+                                stream = _open_spk(None)
+                                await asyncio.get_running_loop().run_in_executor(
+                                    self._audio_executor, stream.write, batch
+                                )
+                            except Exception as fallback_exc:
+                                self.ui.write_log(
+                                    f"SYS: Speaker recovery could not replay one audio batch: "
+                                    f"{type(fallback_exc).__name__}. Continuing with the next chunk."
+                                )
                         continue
                     try:
                         stream.stop()
