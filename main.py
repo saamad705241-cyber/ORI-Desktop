@@ -2768,7 +2768,14 @@ def _mark_update_startup_ready() -> None:
         ready = APP_DATA_DIR / "updates" / "startup" / f"{token}.ready"
         ready.parent.mkdir(parents=True, exist_ok=True)
         ready.write_text(
-            json.dumps({"pid": os.getpid(), "ready_at": datetime.now().isoformat()}),
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "version": APP_VERSION,
+                    "executable": os.path.normcase(os.path.abspath(sys.executable)),
+                    "ready_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                }
+            ),
             encoding="utf-8",
         )
     except Exception as exc:

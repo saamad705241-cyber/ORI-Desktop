@@ -25,6 +25,10 @@ The application migrates existing portable config and memory once, without overw
 
 The helper, transcript and rollback data are kept under `%LOCALAPPDATA%\ORI\updates`, outside the directory being replaced.
 
+## One-time bootstrap for older installed versions
+
+ORI 3.6.0 and 3.6.1 contain the earlier updater helper. Install the current official Setup manually once to receive the version-aware updater in ORI 3.6.2. After that one-time step, future updates use the in-app flow. Portable ZIP builds also require one manual Setup installation.
+
 ## Validation required for a public release
 
 - Build and compile the installer on Windows CI.

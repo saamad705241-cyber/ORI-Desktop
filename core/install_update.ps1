@@ -2,14 +2,18 @@ param(
     [Parameter(Mandatory = $true)][int]$AppPid,
     [Parameter(Mandatory = $true)][string]$InstallerPath,
     [Parameter(Mandatory = $true)][string]$InstallDir,
+    [Parameter(Mandatory = $true)][string]$ExpectedVersion,
     [Parameter(Mandatory = $true)][string]$LogPath,
-    [Parameter(Mandatory = $true)][string]$RollbackDir
+    [Parameter(Mandatory = $true)][string]$RollbackDir,
+    [switch]$NoDialog
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $transcriptStarted = $false
 $backupReady = $false
-$installExe = Join-Path $InstallDir "ORI.exe"
+$newProcess = $null
+$installDir = [System.IO.Path]::GetFullPath($InstallDir)
+$installExe = [System.IO.Path]::GetFullPath((Join-Path $installDir "ORI.exe"))
 
 function Invoke-RobocopyChecked {
     param([string]$From, [string]$To, [switch]$Mirror)
@@ -26,6 +30,10 @@ try {
     Start-Transcript -Path $LogPath -Append | Out-Null
     $transcriptStarted = $true
     Write-Output "ORI installer updater started: $(Get-Date -Format o)"
+    Write-Output "Target version: $ExpectedVersion"
+    Write-Output "Install directory: $installDir"
+    if ($ExpectedVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "ExpectedVersion must be a stable MAJOR.MINOR.PATCH value." }
+    if ([System.IO.Path]::GetFileName($InstallerPath) -ne "ORI-Setup-$ExpectedVersion.exe") { throw "Installer filename does not match target version $ExpectedVersion." }
     if (!(Test-Path -LiteralPath $InstallerPath -PathType Leaf)) { throw "Verified installer is missing: $InstallerPath" }
     if (!(Test-Path -LiteralPath $installExe -PathType Leaf)) { throw "Installed ORI.exe is missing: $installExe" }
     if (!(Test-Path -LiteralPath (Join-Path $InstallDir "unins000.exe") -PathType Leaf)) {
@@ -60,6 +68,15 @@ try {
         throw "Setup completed but the ORI uninstaller was not registered."
     }
 
+    $uninstallEntry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -eq "ORI Personal AI Desktop Assistant" } |
+        Select-Object -First 1
+    if (!$uninstallEntry -or [string]$uninstallEntry.DisplayVersion -ne $ExpectedVersion) {
+        $registeredVersion = if ($uninstallEntry) { [string]$uninstallEntry.DisplayVersion } else { "missing" }
+        throw "Windows registered ORI version $registeredVersion, expected $ExpectedVersion."
+    }
+    Write-Output "Windows uninstall registration confirms ORI $ExpectedVersion."
+
     $token = [Guid]::NewGuid().ToString("N")
     $readyDir = Join-Path $env:LOCALAPPDATA "ORI\updates\startup"
     New-Item -ItemType Directory -Path $readyDir -Force | Out-Null
@@ -67,25 +84,49 @@ try {
     Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
     $newProcess = Start-Process -FilePath $installExe -ArgumentList @("--ori-update-token=$token") -WorkingDirectory $InstallDir -PassThru
 
-    $deadline = (Get-Date).AddSeconds(45)
-    while ((Get-Date) -lt $deadline -and !(Test-Path -LiteralPath $readyFile)) {
+    $deadline = (Get-Date).AddSeconds(90)
+    $startup = $null
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path -LiteralPath $readyFile) {
+            try { $startup = Get-Content -LiteralPath $readyFile -Raw | ConvertFrom-Json -ErrorAction Stop; break }
+            catch { Write-Output "Startup marker is not complete yet: $($_.Exception.Message)" }
+        }
         if (!(Get-Process -Id $newProcess.Id -ErrorAction SilentlyContinue)) {
             throw "Updated ORI exited before reporting startup ready (PID $($newProcess.Id))."
         }
         Start-Sleep -Milliseconds 250
     }
-    if (!(Test-Path -LiteralPath $readyFile)) {
-        throw "Updated ORI did not report startup readiness within 45 seconds."
+    if (!$startup) { throw "Updated ORI did not report startup readiness within 90 seconds." }
+    if ([int]$startup.pid -ne [int]$newProcess.Id) {
+        throw "Startup marker came from PID $($startup.pid), but Windows launched PID $($newProcess.Id)."
     }
-    Start-Sleep -Seconds 5
-    if (!(Get-Process -Id $newProcess.Id -ErrorAction SilentlyContinue)) {
-        throw "Updated ORI exited shortly after reporting startup ready."
+    if ([string]$startup.version -ne $ExpectedVersion) {
+        throw "The launched application reported version $($startup.version), expected $ExpectedVersion."
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$startup.executable)) {
+        throw "The updated application did not report its executable path."
+    }
+    $reportedExecutable = [System.IO.Path]::GetFullPath([string]$startup.executable)
+    if (![string]::Equals($reportedExecutable, $installExe, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The startup handshake came from $reportedExecutable, not the installed executable $installExe."
+    }
+    Write-Output "Startup handshake verified: ORI $($startup.version), PID $($startup.pid), executable $reportedExecutable."
+    for ($i = 0; $i -lt 15; $i++) {
+        if (!(Get-Process -Id $newProcess.Id -ErrorAction SilentlyContinue)) {
+            throw "Updated ORI exited during the 15-second post-start stability check."
+        }
+        Start-Sleep -Seconds 1
     }
     Remove-Item -LiteralPath $readyFile -Force -ErrorAction SilentlyContinue
-    Write-Output "UPDATE SUCCESS. Setup completed and ORI startup was verified (PID $($newProcess.Id))."
+    Write-Output "UPDATE SUCCESS. ORI $ExpectedVersion installed and relaunched from the registered install directory (PID $($newProcess.Id))."
 }
 catch {
-    Write-Output "UPDATE FAILED: $($_.Exception.Message)"
+    $failure = [string]$_.Exception.Message
+    Write-Output "UPDATE FAILED: $failure"
+    if ($newProcess -and (Get-Process -Id $newProcess.Id -ErrorAction SilentlyContinue)) {
+        try { Stop-Process -Id $newProcess.Id -Force -ErrorAction Stop; Start-Sleep -Milliseconds 500 }
+        catch { Write-Output "Could not stop unverified updated process: $($_.Exception.Message)" }
+    }
     if ($backupReady -and (Test-Path -LiteralPath (Join-Path $RollbackDir "ORI.exe") -PathType Leaf)) {
         try {
             Write-Output "Restoring the previous installed program files."
@@ -96,6 +137,21 @@ catch {
         catch {
             Write-Output "ROLLBACK FAILED: $($_.Exception.Message)"
         }
+    }
+    if (!$NoDialog) {
+        try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+            [System.Windows.Forms.MessageBox]::Show(
+                "ORI $ExpectedVersion could not be installed and verified.`r`n`r`nThe previous build was restored when possible.`r`n`r`nReason: $failure`r`n`r`nPlease share this log with the developer:`r`n$LogPath",
+                "ORI update could not be completed",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            ) | Out-Null
+        }
+        catch { Write-Output "Could not display update failure details: $($_.Exception.Message)" }
+    }
+    else {
+        Write-Output "Update failure dialog suppressed by the automated test runner."
     }
     exit 1
 }

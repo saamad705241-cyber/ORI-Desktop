@@ -164,7 +164,7 @@ jobs:
           $installerPath = (Resolve-Path $installer).Path
           $updateLog = Join-Path $env:RUNNER_TEMP "ORI-3.6.0-to-$version-update.log"
           $rollbackDir = Join-Path $env:RUNNER_TEMP "ORI-3.6.0-rollback"
-          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $helperPath -AppPid -1 -InstallerPath $installerPath -InstallDir $upgradeInstall -LogPath $updateLog -RollbackDir $rollbackDir
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $helperPath -AppPid -1 -InstallerPath $installerPath -InstallDir $upgradeInstall -ExpectedVersion $version -NoDialog -LogPath $updateLog -RollbackDir $rollbackDir
           if ($LASTEXITCODE -ne 0) { throw "The real in-place update helper failed. Log: $updateLog" }
           if (!(Select-String -LiteralPath $updateLog -Pattern "UPDATE SUCCESS" -Quiet)) {
             throw "The update helper did not confirm its startup/restart check. Log: $updateLog"

@@ -5309,7 +5309,10 @@ class MainWindow(QMainWindow):
             )
         try:
             from core.app_updater import schedule_windows_update
-            scheduled = schedule_windows_update(str(data["installer_path"]))
+            scheduled = schedule_windows_update(
+                str(data["installer_path"]),
+                expected_version=str(data.get("version") or ""),
+            )
             if not scheduled.get("ok"):
                 self._finish_update_flow(
                     str(scheduled.get("message") or "Could not start the update installer."),

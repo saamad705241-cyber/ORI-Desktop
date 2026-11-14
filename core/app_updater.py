@@ -276,8 +276,11 @@ def _launch_detached_helper(
         return False, f"{type(exc).__name__}: {exc}", None
 
 
-def schedule_windows_update(installer_path: str) -> dict[str, Any]:
-    """Start the detached Setup helper and return only that it was started."""
+def schedule_windows_update(
+    installer_path: str,
+    expected_version: str | None = None,
+) -> dict[str, Any]:
+    """Start the detached Setup helper with an exact version to verify after relaunch."""
     if platform_name() != "Windows" or not getattr(sys, "frozen", False):
         return {
             "ok": False,
@@ -288,6 +291,18 @@ def schedule_windows_update(installer_path: str) -> dict[str, Any]:
     installed_exe = install_dir / "ORI.exe"
     uninstaller = install_dir / "unins000.exe"
     installer = Path(installer_path).expanduser().resolve()
+    setup_match = _SETUP_RE.fullmatch(installer.name)
+    target_version = str(expected_version or (setup_match.group(1) if setup_match else "")).strip()
+    if not re.fullmatch(r"\d+\.\d+\.\d+", target_version):
+        return {
+            "ok": False,
+            "message": "The downloaded installer does not contain a valid target ORI version.",
+        }
+    if not setup_match or setup_match.group(1) != target_version:
+        return {
+            "ok": False,
+            "message": "The target ORI version does not match the downloaded Setup filename.",
+        }
     if not installed_exe.is_file():
         return {"ok": False, "message": f"The installed ORI executable is missing: {installed_exe}"}
     if not uninstaller.is_file():
@@ -315,6 +330,7 @@ def schedule_windows_update(installer_path: str) -> dict[str, Any]:
             "-AppPid", str(os.getpid()),
             "-InstallerPath", str(installer),
             "-InstallDir", str(install_dir),
+            "-ExpectedVersion", target_version,
             "-LogPath", str(log_file := (state_dir / log_name)),
             "-RollbackDir", str(rollback_dir),
         ],
@@ -326,9 +342,9 @@ def schedule_windows_update(installer_path: str) -> dict[str, Any]:
         "ok": True,
         "log_file": str(log_file or ""),
         "message": (
-            "The verified ORI Setup installer has started. ORI will close; the helper will "
-            "install the update, verify that the new ORI starts, and restore the previous "
-            f"program if installation or startup fails. Log: {log_file}"
+            f"The verified ORI {target_version} Setup installer has started. ORI will close; "
+            "the helper will verify the exact installed version, executable path and new process "
+            f"before reporting success. The previous build is restored on failure. Log: {log_file}"
         ),
     }
 

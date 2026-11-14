@@ -29,19 +29,19 @@ A normal merge that does not bump the version must not publish another release. 
 
 ## User's part
 
-For an already installed packaged ORI, the user does not need to download the repository or manually upload files. Once a verified release is published, the user uses ORI's existing About & Updates controls to check, download and install it. The updater requires internet access. Source/development runs do not automatically replace their own files.
+For an already installed packaged ORI, the user does not need to download the repository or manually upload files. Setup-managed ORI 3.6.2 and later use the version-verified About & Updates flow. Users on 3.6.0 or 3.6.1 must run the current official Setup manually once because those builds contain the older bundled update helper. The updater requires internet access. Source/development runs do not automatically replace their own files.
 
 ## CI and release workflow
 
 - `.github/workflows/ci.yml` runs compilation, tests, Ruff and Gitleaks, and produces a Windows package smoke-test artifact.
 - `.github/workflows/release.yml` publishes a new stable release after a successful main-branch merge only when `APP_VERSION` is newer than the latest stable GitHub Release.
-- Manual version tags remain supported, but the tag must match `APP_VERSION`.
+- The release workflow is triggered only after the main-branch `ORI CI` workflow succeeds. It builds from that exact tested commit and skips publication if the version has not increased.
 
 ## Safety and release integrity
 
 - Do not publish incomplete changes or increment versions for failed fixes.
 - Keep user API keys and local memory out of releases.
-- The release ZIP contains the full app folder; the final single-file installer and uninstaller remain a separate last phase.
+- The published Setup executable is the single-file user-facing installer and contains the complete Windows app payload, including its runtime.
 - Verify third-party license and redistribution terms before public binary distribution.
 
 
@@ -55,7 +55,7 @@ The installed Settings page exposes three separate actions:
 
 Personal settings, API credentials, memory, logs and downloads live outside the program directory and must remain intact through update and uninstall. Helper transcripts are stored under `%LOCALAPPDATA%/ORI/updates/install-helper`.
 
-The in-app update requires a Setup-managed Windows installation. Portable ZIP builds must install the official Setup once before they can use the staged updater.
+The in-app update requires a Setup-managed Windows installation. Portable ZIP builds must install the official Setup once before they can use the staged updater. Setup-managed 3.6.0 and 3.6.1 builds must also install the current Setup manually once to replace their older bundled updater helper.
 
 ## CI and release verification
 
