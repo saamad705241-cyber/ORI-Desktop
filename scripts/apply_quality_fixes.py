@@ -586,7 +586,6 @@ def test_browser_only_youtube_tool_is_not_described_as_the_playback_route():
     assert "use video_player" in declaration
 """,
         encoding="utf-8",
-        newline="\\n",
     )
 
     # Regression tests for the new behaviours.
