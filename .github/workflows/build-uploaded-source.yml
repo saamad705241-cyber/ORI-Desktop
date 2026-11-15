@@ -1,4 +1,4 @@
-name: Build ORI Installer from Uploaded Source ZIP
+name: Build ORI 3.6.6 Installer from Uploaded Source ZIP
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Extract the uploaded ORI 3.6.5 source ZIP
+      - name: Extract the uploaded ORI 3.6.6 source ZIP
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
@@ -59,9 +59,16 @@ jobs:
           $mainText = $mainText.Replace($oldCode, $newCode)
           [System.IO.File]::WriteAllText($mainPath, $mainText, [System.Text.UTF8Encoding]::new($false))
           Write-Host "Applied proactive-mode event loop correction to the extracted source."
+          python (Join-Path $env:GITHUB_WORKSPACE "scripts/apply_quality_fixes.py") $source
+          if ($LASTEXITCODE -ne 0) { throw "ORI quality fixes could not be applied." }
+          $workflowDest = Join-Path $source ".github/workflows"
+          New-Item -ItemType Directory -Path $workflowDest -Force | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE ".github/workflows/ci.yml") -Destination $workflowDest
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE ".github/workflows/release.yml") -Destination $workflowDest
+          Write-Host "Applied quality fixes and restored repository workflow fixtures for source tests."
           $version = (& python -c "import ast,pathlib; t=ast.parse(pathlib.Path(r'$source/ori_metadata.py').read_text(encoding='utf-8')); print(next(n.value.value for n in t.body if isinstance(n,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='APP_VERSION' for x in n.targets)))").Trim()
-          if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.5") {
-            throw "Expected source version 3.6.5, found '$version'."
+          if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.6") {
+            throw "Expected source version 3.6.6, found '$version'."
           }
           $updater = Get-Content -LiteralPath (Join-Path $source "core/app_updater.py") -Raw
           if ($updater -notmatch 'DEFAULT_REPOSITORY\s*=\s*"saamad705241-cyber/ORI-Desktop"') {
@@ -75,8 +82,8 @@ jobs:
         working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         run: |
           $version = (python -c "from ori_metadata import APP_VERSION; print(APP_VERSION)").Trim()
-          if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.5") {
-            throw "Build directory is not the expected ORI 3.6.5 extracted source. Found '$version'."
+          if ($LASTEXITCODE -ne 0 -or $version -ne "3.6.6") {
+            throw "Build directory is not the expected ORI 3.6.6 extracted source. Found '$version'."
           }
           Write-Host "Building source version $version from the uploaded ZIP."
 
@@ -114,6 +121,41 @@ jobs:
             throw "A private API configuration must not be included in the installer."
           }
 
+      - name: Sign ORI application executable when certificate is configured
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
+        env:
+          ORI_SIGNING_PFX_BASE64: ${{ secrets.ORI_SIGNING_PFX_BASE64 }}
+          ORI_SIGNING_PFX_PASSWORD: ${{ secrets.ORI_SIGNING_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hasCertificate = ![string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_BASE64)
+          $hasPassword = ![string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_PASSWORD)
+          if (!$hasCertificate -and !$hasPassword) {
+            Write-Warning "No Authenticode certificate is configured. Continuing with an UNSIGNED QA/publication build; Windows SmartScreen may show its warning."
+            "ORI_SIGNING_STATUS=unsigned (SmartScreen warning possible)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            exit 0
+          }
+          if (!$hasCertificate -or !$hasPassword) { throw "Both ORI_SIGNING_PFX_BASE64 and ORI_SIGNING_PFX_PASSWORD must be configured together." }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "ori-code-signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:ORI_SIGNING_PFX_BASE64))
+            $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (!$signTool) { throw "Windows SDK signtool.exe was not found on the runner." }
+            $app = "dist/ORI/ORI.exe"
+            if (!(Test-Path -LiteralPath $app -PathType Leaf)) { throw "ORI.exe is missing before signing." }
+            & $signTool.FullName sign /fd SHA256 /f $pfxPath /p $env:ORI_SIGNING_PFX_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $app
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode signing of ORI.exe failed." }
+            & $signTool.FullName verify /pa /all /v $app
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode signature verification of ORI.exe failed." }
+            "ORI_SIGNING_STATUS=signed" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Host "ORI.exe is digitally signed and its Authenticode signature is verified."
+          }
+          finally {
+            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
+          }
+
       - name: Install Inno Setup and compile final installer
         shell: pwsh
         working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
@@ -122,20 +164,60 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not install Inno Setup on the Windows runner." }
           $compiler = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if (!$compiler) { throw "Inno Setup compiler ISCC.exe was not found." }
-          & $compiler.FullName "/DMyAppVersion=3.6.5" "installer\ORI.iss"
+          & $compiler.FullName "/DMyAppVersion=3.6.6" "installer\ORI.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup installer compilation failed." }
-          $installer = "dist/installer/ORI-Setup-3.6.5.exe"
+          $installer = "dist/installer/ORI-Setup-3.6.6.exe"
           if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Final ORI Setup EXE was not created." }
+          Write-Host "Created ORI-Setup-3.6.6.exe; Authenticode signing is the next required step."
+
+      - name: Sign and verify final installer when certificate is configured
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
+        env:
+          ORI_SIGNING_PFX_BASE64: ${{ secrets.ORI_SIGNING_PFX_BASE64 }}
+          ORI_SIGNING_PFX_PASSWORD: ${{ secrets.ORI_SIGNING_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hasCertificate = ![string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_BASE64)
+          $hasPassword = ![string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_PASSWORD)
+          if (!$hasCertificate -and !$hasPassword) {
+            Write-Warning "Publishing unsigned ORI Setup so existing installations can test the in-app updater. SmartScreen may display its warning."
+            exit 0
+          }
+          if (!$hasCertificate -or !$hasPassword) { throw "Both ORI_SIGNING_PFX_BASE64 and ORI_SIGNING_PFX_PASSWORD must be configured together." }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "ori-code-signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:ORI_SIGNING_PFX_BASE64))
+            $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (!$signTool) { throw "Windows SDK signtool.exe was not found on the runner." }
+            $installer = "dist/installer/ORI-Setup-3.6.6.exe"
+            if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw "The final installer is missing." }
+            & $signTool.FullName sign /fd SHA256 /f $pfxPath /p $env:ORI_SIGNING_PFX_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $installer
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode signing of ORI Setup failed." }
+            & $signTool.FullName verify /pa /all /v $installer
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode verification of ORI Setup failed." }
+            Write-Host "ORI Setup is digitally signed and its Authenticode signature is verified."
+          }
+          finally {
+            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
+          }
+
+      - name: Create checksum for final installer after optional signing
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
+        run: |
+          $installer = "dist/installer/ORI-Setup-3.6.6.exe"
           $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  ORI-Setup-3.6.5.exe" | Set-Content -Encoding ascii "dist/installer/ORI-Setup-3.6.5.exe.sha256"
-          Write-Host "Created final self-contained ORI-Setup-3.6.5.exe and SHA-256 file."
+          "$hash  ORI-Setup-3.6.6.exe" | Set-Content -Encoding ascii "dist/installer/ORI-Setup-3.6.6.exe.sha256"
+          Write-Host "Created SHA-256 checksum after Authenticode signing."
 
       - name: Smoke-test the installer on Windows
         shell: pwsh
         working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         run: |
-          $installer = (Resolve-Path "dist/installer/ORI-Setup-3.6.5.exe").Path
-          $testDir = Join-Path $env:RUNNER_TEMP "ORI-3.6.5-Installer-Smoke"
+          $installer = (Resolve-Path "dist/installer/ORI-Setup-3.6.6.exe").Path
+          $testDir = Join-Path $env:RUNNER_TEMP "ORI-3.6.6-Installer-Smoke"
           $install = Start-Process -FilePath $installer -ArgumentList @(
             "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
             "/DIR=`"$testDir`""
@@ -157,25 +239,25 @@ jobs:
         run: |
           $out = Join-Path $env:GITHUB_WORKSPACE "release-artifacts"
           New-Item -ItemType Directory -Path $out -Force | Out-Null
-          Copy-Item -LiteralPath (Join-Path $env:ORI_SOURCE "dist/installer/ORI-Setup-3.6.5.exe") -Destination $out
-          Copy-Item -LiteralPath (Join-Path $env:ORI_SOURCE "dist/installer/ORI-Setup-3.6.5.exe.sha256") -Destination $out
+          Copy-Item -LiteralPath (Join-Path $env:ORI_SOURCE "dist/installer/ORI-Setup-3.6.6.exe") -Destination $out
+          Copy-Item -LiteralPath (Join-Path $env:ORI_SOURCE "dist/installer/ORI-Setup-3.6.6.exe.sha256") -Destination $out
 
       - name: Upload installer build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ORI-3.6.5-Windows-Installer
+          name: ORI-3.6.6-Windows-Installer
           path: release-artifacts/*
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish ORI v3.6.5 GitHub release
+      - name: Publish ORI v3.6.6 GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.6.5
+          tag_name: v3.6.6
           target_commitish: ${{ github.sha }}
-          name: ORI v3.6.5
+          name: ORI v3.6.6
           body: |
-            Windows installer built directly from the uploaded ORI 3.6.5 source archive.
+            Windows installer built directly from the uploaded ORI 3.6.6 source archive.
 
             The Setup bundles the Python runtime and application dependencies. Users do not need to install Python, Java, or Node.js separately.
 
@@ -188,5 +270,5 @@ jobs:
           overwrite_files: true
           fail_on_unmatched_files: true
           files: |
-            release-artifacts/ORI-Setup-3.6.5.exe
-            release-artifacts/ORI-Setup-3.6.5.exe.sha256
+            release-artifacts/ORI-Setup-3.6.6.exe
+            release-artifacts/ORI-Setup-3.6.6.exe.sha256
