@@ -838,12 +838,9 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
     replace_once(helper_path, '    [switch]$NoDialog,', '    [switch]$InteractiveSetup,\n    [switch]$NoDialog,', label="interactive setup flag")
     replace_once(
         helper_path,
-        '''    Write-Output "Waiting up to 120 seconds for ORI PID $AppPid to exit."
+        '''    Write-Output "Waiting up to 25 seconds for ORI PID $AppPid to exit on its own."
     if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) {
-        Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue
-    }
-    if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) {
-        throw "ORI PID $AppPid did not close within 120 seconds."
+        Wait-Process -Id $AppPid -Timeout 25 -ErrorAction SilentlyContinue
     }''',
         '''    Write-Output "Waiting up to 20 seconds for ORI PID $AppPid to exit."
     $closeDeadline = (Get-Date).AddSeconds(20)
@@ -868,6 +865,24 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
     }''',
         label="bounded process shutdown with exact PID fallback",
     )
+
+    # The uploaded safe source ZIP still carries the earlier contract assertion.
+    # Keep its test aligned with the hardened graceful-close + exact-PID fallback.
+    contract_test = source / "tests" / "test_installer_contract.py"
+    if contract_test.exists():
+        contract_text = contract_test.read_text(encoding="utf-8")
+        for old_assertion in (
+            '    assert "Wait-Process -Id $AppPid -Timeout 25" in source',
+            '    assert "Wait-Process -Id $AppPid -Timeout 120" in source',
+        ):
+            contract_text = contract_text.replace(
+                old_assertion,
+                '    assert "Waiting up to 20 seconds" in source\\n'
+                '    assert "CloseMainWindow()" in source\\n'
+                '    assert "Stop-Process -Id $AppPid -Force" in source',
+            )
+        contract_test.write_text(contract_text, encoding="utf-8", newline="\\n")
+
     replace_once(
         helper_path,
         '''    Write-Output "Running the SHA-256-verified ORI Setup installer silently."
