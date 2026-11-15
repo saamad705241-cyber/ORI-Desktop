@@ -888,7 +888,7 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
         '''    Write-Output "Running the SHA-256-verified ORI Setup installer silently."
     $arguments = @(
         "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
-        "/CLOSEAPPLICATIONS", "/DIR=\x60"$InstallDir\x60""
+        "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/DIR=\x60"$InstallDir\x60""
     )
     $setup = Start-Process -FilePath $InstallerPath -ArgumentList $arguments -Wait -PassThru''',
         '''    if ($InteractiveSetup) {
@@ -911,17 +911,17 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
     )
 
     assistant_path = source / "core" / "update_assistant.ps1"
-    replace_once(assistant_path, '  "-NoDialog","-NoLaunch")', '  "-NoDialog","-NoLaunch","-InteractiveSetup")', label="assistant opens interactive Setup")
+    replace_once(assistant_path, '  "-NoDialog", "-NoLaunch"', '  "-NoDialog", "-NoLaunch", "-InteractiveSetup"', label="assistant opens interactive Setup")
     replace_once(
         assistant_path,
-        'Set-Status "Preparing protected installation" "Starting the rollback-capable Windows Setup helper." 12',
-        'Set-Status "Opening Windows Setup" "The ORI Setup wizard will show its own installation progress. This assistant will provide LAUNCH ORI after verification." 12',
+        'Set-AssistantStatus "Preparing your update" "Closing ORI safely and checking the installation." 18',
+        'Set-AssistantStatus "Opening Windows Setup" "The ORI Setup wizard will show its own installation progress. This assistant will provide LAUNCH ORI after verification." 18',
         label="interactive Setup status",
     )
     replace_once(
         assistant_path,
-        'if ($log -match "Running the SHA-256-verified") { Set-Status "Installing ORI $ExpectedVersion" "Windows Setup is replacing program files. Keep this window open." -1 -Busy }',
-        'if ($log -match "Running the SHA-256-verified") { Set-Status "Installing ORI $ExpectedVersion" "Follow the visible Windows Setup wizard. This assistant will offer LAUNCH ORI when installation is verified." -1 -Busy }',
+        'Set-AssistantStatus "Installing ORI $ExpectedVersion" "Windows Setup is replacing the program files. Please keep this window open." -1 -Busy',
+        'Set-AssistantStatus "Installing ORI $ExpectedVersion" "Follow the visible Windows Setup wizard. This assistant will offer LAUNCH ORI when installation is verified." -1 -Busy',
         label="interactive Setup progress status",
     )
 
