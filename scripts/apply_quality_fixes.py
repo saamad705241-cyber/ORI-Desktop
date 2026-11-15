@@ -760,11 +760,33 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
 
     ui_path = source / "ui.py"
     ui_text = ui_path.read_text(encoding="utf-8")
-    # The uploaded SAFE ZIP has a different label from the repository's working
-    # tree. Match the install-stage value structurally instead of assuming its
-    # historical button wording.
-    ui_text, label_count = re.subn(
-        r'(?m)^(\\s*["\\']install["\\']\\s*:\\s*)["\\'][^"\\']+["\\'](\\s*,?\\s*)
+    # The uploaded SAFE ZIP uses a different install-stage label from the
+    # repository working tree. Replace the value by its dictionary key instead
+    # of assuming the historical button wording.
+    ui_path = source / "ui.py"
+    ui_lines = ui_path.read_text(encoding="utf-8").splitlines()
+    updated_install_label = False
+    for index, line in enumerate(ui_lines):
+        stripped = line.lstrip()
+        key, separator, value = stripped.partition(":")
+        if separator and key.strip() in {'"install"', "'install'"}:
+            comma = "," if value.rstrip().endswith(",") else ""
+            indent = line[:len(line) - len(stripped)]
+            ui_lines[index] = indent + key.strip() + ': "UPDATE NOW"' + comma
+            updated_install_label = True
+            break
+    if not updated_install_label and not any('"UPDATE NOW"' in line for line in ui_lines):
+        raise RuntimeError("Could not locate the install-stage updater button label in ui.py.")
+    ui_text = "\n".join(ui_lines) + "\n"
+    ui_text = ui_text.replace(
+        "Click OPEN UPDATE ASSISTANT when you are ready.",
+        "Click UPDATE NOW to open the Windows Setup wizard.",
+    )
+    ui_text = ui_text.replace(
+        "Checks GitHub first, then changes to Download Update and Install & Restart.",
+        "Checks GitHub first, downloads the verified Setup and enables UPDATE NOW.",
+    )
+    ui_path.write_text(ui_text, encoding="utf-8", newline="\n")
 
     ui_path = source / "ui.py"
     ui_text = ui_path.read_text(encoding="utf-8")
