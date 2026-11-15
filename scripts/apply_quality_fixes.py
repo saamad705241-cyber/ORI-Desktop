@@ -760,24 +760,38 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
 
     ui_path = source / "ui.py"
     ui_text = ui_path.read_text(encoding="utf-8")
-    # The uploaded SAFE ZIP uses a different install-stage label from the
-    # repository working tree. Replace the value by its dictionary key instead
-    # of assuming the historical button wording.
+    # Replace the complete stage-button renderer so its label does not depend
+    # on whichever wording the uploaded SAFE ZIP used in its prior release.
     ui_path = source / "ui.py"
-    ui_lines = ui_path.read_text(encoding="utf-8").splitlines()
-    updated_install_label = False
-    for index, line in enumerate(ui_lines):
-        stripped = line.lstrip()
-        key, separator, value = stripped.partition(":")
-        if separator and key.strip() in {'"install"', "'install'"}:
-            comma = "," if value.rstrip().endswith(",") else ""
-            indent = line[:len(line) - len(stripped)]
-            ui_lines[index] = indent + key.strip() + ': "UPDATE NOW"' + comma
-            updated_install_label = True
-            break
-    if not updated_install_label and not any('"UPDATE NOW"' in line for line in ui_lines):
-        raise RuntimeError("Could not locate the install-stage updater button label in ui.py.")
-    ui_text = "\n".join(ui_lines) + "\n"
+    ui_text = ui_path.read_text(encoding="utf-8")
+    stage_start = ui_text.find("    def _set_update_action(self, stage: str) -> None:")
+    stage_end = ui_text.find("    def _handle_update_action(self) -> None:", stage_start)
+    new_stage_method = '''    def _set_update_action(self, stage: str) -> None:
+        """Render the single updater action for the current explicit step."""
+        labels = {
+            "check": "CHECK FOR UPDATES",
+            "checking": "CHECKING…",
+            "download": "DOWNLOAD UPDATE",
+            "downloading": "DOWNLOADING…",
+            "install": "UPDATE NOW",
+            "installing": "OPENING SETUP…",
+        }
+        if stage not in labels:
+            stage = "check"
+        self._update_stage = stage
+        action = getattr(self, "_update_action_btn", None)
+        if action is None:
+            return
+        action.setText(labels[stage])
+        action.setEnabled(
+            stage not in {"checking", "downloading", "installing"}
+            and not (stage == "install" and not self._installed_setup_build)
+        )
+
+'''
+    if stage_start < 0 or stage_end < 0:
+        raise RuntimeError("Could not locate the updater action renderer in ui.py.")
+    ui_text = ui_text[:stage_start] + new_stage_method + ui_text[stage_end:]
     ui_text = ui_text.replace(
         "Click OPEN UPDATE ASSISTANT when you are ready.",
         "Click UPDATE NOW to open the Windows Setup wizard.",
@@ -786,7 +800,7 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
         "Checks GitHub first, then changes to Download Update and Install & Restart.",
         "Checks GitHub first, downloads the verified Setup and enables UPDATE NOW.",
     )
-    ui_path.write_text(ui_text, encoding="utf-8", newline="\n")
+    ui_path.write_text(ui_text, encoding="utf-8", newline="\\n")
 
     ui_path = source / "ui.py"
     ui_text = ui_path.read_text(encoding="utf-8")
