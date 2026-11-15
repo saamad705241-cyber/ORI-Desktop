@@ -63,10 +63,17 @@ jobs:
 
           $uiFile = Join-Path $source "ui.py"
           Write-Host "=== ORI SOURCE UI UPDATE DIAGNOSTICS BEGIN ==="
-          $updateMatches = Select-String -LiteralPath $uiFile -Pattern "update|install|_stage|_action_btn" -Context 1,2
-          $updateMatches | Select-Object -First 100 | ForEach-Object {
-            Write-Host ("UI-LINE " + $_.LineNumber + ": " + $_.Line.Trim())
+          $uiText = Get-Content -LiteralPath $uiFile -Raw
+          foreach ($needle in @("def _handle_update_action", "def _apply_app_update_check", "def _apply_app_update_download", "def _install_downloaded_update", "def _download_app_update", "def _set_update_action")) {
+            $at = $uiText.IndexOf($needle)
+            if ($at -ge 0) {
+              $end = [Math]::Min($uiText.Length, $at + 11000)
+              Write-Host ("=== SOURCE METHOD " + $needle + " ===")
+              Write-Host $uiText.Substring($at, $end - $at)
+            } else { Write-Host ("=== SOURCE METHOD MISSING " + $needle + " ===") }
           }
+          Write-Host "=== SOURCE UPDATE SETTINGS PANEL ==="
+          Write-Host $uiText.Substring([Math]::Max(0, $uiText.IndexOf("self._update_flow_stage") - 1200), 4500)
           Write-Host "=== ORI SOURCE UI UPDATE DIAGNOSTICS END ==="
 
           python (Join-Path $env:GITHUB_WORKSPACE "scripts/apply_quality_fixes.py") $source
