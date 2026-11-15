@@ -61,6 +61,19 @@ jobs:
           [System.IO.File]::WriteAllText($mainPath, $mainText, [System.Text.UTF8Encoding]::new($false))
           Write-Host "Applied proactive-mode event loop correction to the extracted source."
 
+          foreach ($relative in @("core/install_update.ps1", "core/update_assistant.ps1", "installer/ORI.iss")) {
+            $full = Join-Path $source $relative
+            Write-Host ("=== SOURCE SCRIPT DIAGNOSTICS " + $relative + " ===")
+            if (Test-Path -LiteralPath $full) {
+              Select-String -LiteralPath $full -Pattern "AppPid|Wait-Process|Start-Process|InstallerPath|VERYSILENT|NoDialog|NoLaunch|Preparing protected|Installing ORI|^\[Run\]|Launch ORI|backup|Backup" -Context 2,5 |
+                Select-Object -First 100 | ForEach-Object {
+                  Write-Host ("SCRIPT-LINE " + $_.LineNumber + ": " + $_.Line.Trim())
+                  $_.Context.PostContext | ForEach-Object { Write-Host ("  " + $_.Trim()) }
+                }
+            }
+          }
+
+
 
           python (Join-Path $env:GITHUB_WORKSPACE "scripts/apply_quality_fixes.py") $source
           if ($LASTEXITCODE -ne 0) { throw "ORI quality fixes could not be applied." }
