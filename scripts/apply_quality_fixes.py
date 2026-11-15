@@ -881,7 +881,22 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
                 '    assert "CloseMainWindow()" in source\n'
                 '    assert "Stop-Process -Id $AppPid -Force" in source',
             )
-        contract_test.write_text(contract_text, encoding="utf-8", newline="\n")
+        contract_text = contract_text.replace(
+            '    assert "skipifsilent" in source',
+            '    assert "[Run]" not in source\\n    assert "LAUNCH ORI" in source',
+        )
+        contract_test.write_text(contract_text, encoding="utf-8", newline="\\n")
+
+    # The uploaded UI is on the consolidated UPDATE NOW action; older tests
+    # still look for the retired OPEN UPDATE ASSISTANT label.
+    for test_path in (source / "tests").glob("*.py"):
+        test_text = test_path.read_text(encoding="utf-8")
+        if "OPEN UPDATE ASSISTANT" in test_text:
+            test_path.write_text(
+                test_text.replace("OPEN UPDATE ASSISTANT", "UPDATE NOW"),
+                encoding="utf-8",
+                newline="\\n",
+            )
 
     replace_once(
         helper_path,
@@ -894,7 +909,7 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
         '''    if ($InteractiveSetup) {
         Write-Output "Running the SHA-256-verified ORI Setup installer in interactive wizard mode."
         $arguments = @(
-            "/CLOSEAPPLICATIONS", "/NORESTART", "/SP-",
+            "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/NORESTART", "/SP-",
             "/DIR=\x60"$InstallDir\x60""
         )
     }
@@ -902,7 +917,7 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
         Write-Output "Running the SHA-256-verified ORI Setup installer silently (legacy mode)."
         $arguments = @(
             "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
-            "/CLOSEAPPLICATIONS", "/DIR=\x60"$InstallDir\x60""
+            "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/DIR=\x60"$InstallDir\x60""
         )
     }
     # In interactive mode the actual Windows Setup wizard remains visible.
