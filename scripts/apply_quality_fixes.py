@@ -251,34 +251,34 @@ from core.voice_leveler        import VoiceLeveler''',
     # Route explicit song/music requests through the player that owns the audio stream.
     replace_once(
         source / "actions" / "video_player.py",
-        ```        "Plays a VIDEO on the assistant's own display in the central visualisation area "```,
-        ```        "Plays MUSIC, SONGS and VIDEOS through ORI's central display player; "```,
+        '''        "Plays a VIDEO on the assistant's own display in the central visualisation area "''',
+        '''        "Plays MUSIC, SONGS and VIDEOS through ORI's central display player; "''',
         label="media tool music capability",
     )
     replace_once(
         source / "actions" / "video_player.py",
-        ```        "user wants to WATCH something on screen: 'play the new Dune trailer', "```,
-        ```        "user wants to PLAY or HEAR music/songs, or WATCH something on screen: "
+        '''        "user wants to WATCH something on screen: 'play the new Dune trailer', "''',
+        '''        "user wants to PLAY or HEAR music/songs, or WATCH something on screen: "
         "'play Arijit Singh songs', 'play this song', 'listen to music', "
-        "'play the new Dune trailer', "```,
+        "'play the new Dune trailer', "''',
         label="route natural-language song requests",
     )
     replace_once(
         source / "actions" / "video_player.py",
-        ```        "Do NOT use 'youtube_video' for this: that optional plugin opens videos "```,
-        ```        "Do NOT use 'youtube_video' for playback: its play action only opens a browser page. "```,
+        '''        "Do NOT use 'youtube_video' for this: that optional plugin opens videos "''',
+        '''        "Do NOT use 'youtube_video' for playback: its play action only opens a browser page. "''',
         label="prefer ORI-managed playback over browser-only YouTube",
     )
     replace_once(
         source / "actions" / "youtube_video.py",
-        ```    "description": "Controls YouTube. Use for: playing videos, summarizing a video's content, getting video info, or showing trending videos.",```,
-        ```    "description": (
+        '''    "description": "Controls YouTube. Use for: playing videos, summarizing a video's content, getting video info, or showing trending videos.",''',
+        '''    "description": (
         "Use only for summarizing a YouTube video's content, getting video information, "
         "or showing trending videos. Do NOT use this tool to play music, songs or videos: "
         "its play action only opens a browser page and does not manage ORI's media audio. "
         "For any actual playback request, use video_player so sound starts on and ORI "
         "can manage buffering, mute state and microphone handoff."
-    ),```,
+    ),''',
         label="route YouTube playback away from browser-only tool",
     )
 
