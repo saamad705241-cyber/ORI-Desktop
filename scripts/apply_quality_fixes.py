@@ -260,6 +260,14 @@ from core.voice_leveler        import VoiceLeveler''',
         "\"description\": \"play (compatibility alias to video_player) | summarize | get_info | trending\"",
         label="document YouTube play compatibility delegation",
     )
+    replace_once(
+        source / "actions" / "youtube_video.py",
+        '''    if player:
+        player.write_log(f"[Media] Opening requested playback: {query}")''',
+        '''    if player is not None and callable(getattr(player, "write_log", None)):
+        player.write_log(f"[Media] Opening requested playback: {query}")''',
+        label="guard optional media log interface",
+    )
     # Route explicit song/music requests through the player that owns the audio stream.
     replace_once(
         source / "actions" / "video_player.py",
