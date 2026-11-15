@@ -760,47 +760,21 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
 
     ui_path = source / "ui.py"
     ui_text = ui_path.read_text(encoding="utf-8")
-    # Replace the complete stage-button renderer so its label does not depend
-    # on whichever wording the uploaded SAFE ZIP used in its prior release.
+    # The source updater passes button labels directly to _set_update_action.
+    # Switch only the post-download installer stage to the explicit user action.
     ui_path = source / "ui.py"
-    ui_text = ui_path.read_text(encoding="utf-8")
-    stage_start = ui_text.find("    def _set_update_action(self, stage: str) -> None:")
-    stage_end = ui_text.find("    def _handle_update_action(self) -> None:", stage_start)
-    new_stage_method = '''    def _set_update_action(self, stage: str) -> None:
-        """Render the single updater action for the current explicit step."""
-        labels = {
-            "check": "CHECK FOR UPDATES",
-            "checking": "CHECKING…",
-            "download": "DOWNLOAD UPDATE",
-            "downloading": "DOWNLOADING…",
-            "install": "UPDATE NOW",
-            "installing": "OPENING SETUP…",
-        }
-        if stage not in labels:
-            stage = "check"
-        self._update_stage = stage
-        action = getattr(self, "_update_action_btn", None)
-        if action is None:
-            return
-        action.setText(labels[stage])
-        action.setEnabled(
-            stage not in {"checking", "downloading", "installing"}
-            and not (stage == "install" and not self._installed_setup_build)
-        )
-
-'''
-    if stage_start < 0 or stage_end < 0:
-        raise RuntimeError("Could not locate the updater action renderer in ui.py.")
-    ui_text = ui_text[:stage_start] + new_stage_method + ui_text[stage_end:]
-    ui_text = ui_text.replace(
-        "Click OPEN UPDATE ASSISTANT when you are ready.",
-        "Click UPDATE NOW to open the Windows Setup wizard.",
+    replace_once(
+        ui_path,
+        'self._set_update_action("OPEN UPDATE ASSISTANT", enabled=True, stage="install")',
+        'self._set_update_action("UPDATE NOW", enabled=True, stage="install")',
+        label="explicit update now button",
     )
-    ui_text = ui_text.replace(
-        "Checks GitHub first, then changes to Download Update and Install & Restart.",
-        "Checks GitHub first, downloads the verified Setup and enables UPDATE NOW.",
+    replace_once(
+        ui_path,
+        'message += "Press OPEN UPDATE ASSISTANT to install. The separate assistant will show the installation status and then offer LAUNCH ORI."',
+        'message += "Press UPDATE NOW to open the Windows Setup wizard. The assistant will offer LAUNCH ORI after installation."',
+        label="post-download installer instruction",
     )
-    ui_path.write_text(ui_text, encoding="utf-8", newline="\\n")
 
     ui_path = source / "ui.py"
     ui_text = ui_path.read_text(encoding="utf-8")
@@ -821,7 +795,7 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
             return
 
         # Clicking UPDATE NOW is the user's confirmation; remove the redundant restart prompt.
-        self._set_update_action("installing")
+        self._set_update_action("STARTING INSTALLER…", enabled=False, stage="installing")
         if hasattr(self, "_app_update_status_lbl"):
             self._app_update_status_lbl.setText(
                 "Opening the ORI Windows Setup wizard. Follow its on-screen steps and watch its "
@@ -845,7 +819,7 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
                     "Update Assistant opened. ORI is closing now. Complete the Windows Setup wizard; "
                     "then press LAUNCH ORI in the assistant."
                 )
-            QApplication.quit()
+            self._quit_for_external_helper()
         except Exception as exc:
             self._finish_update_flow(
                 f"Could not open the ORI Setup wizard: {type(exc).__name__}: {exc}",
@@ -953,12 +927,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_update_now_opens_setup_without_an_extra_restart_confirmation():
     ui = (ROOT / "ui.py").read_text(encoding="utf-8")
-    assert '"install": "UPDATE NOW"' in ui
-    assert "Click UPDATE NOW to open the Windows Setup wizard." in ui
+    assert 'self._set_update_action("UPDATE NOW", enabled=True, stage="install")' in ui
+    assert "Press UPDATE NOW to open the Windows Setup wizard." in ui
     method = ui.split("def _install_downloaded_update", 1)[1].split("def _uninstall_ori", 1)[0]
     assert "QMessageBox.question" not in method
     assert "schedule_windows_update" in method
-    assert "QApplication.quit()" in method
+    assert "self._quit_for_external_helper()" in method
 
 
 def test_assistant_runs_the_visible_setup_and_offers_manual_launch():
@@ -981,17 +955,3 @@ def test_helper_closes_stuck_old_process_after_bounded_wait():
 def test_installer_does_not_auto_launch_ori():
     installer = (ROOT / "installer" / "ORI.iss").read_text(encoding="utf-8")
     assert "[Run]" not in installer
-""", encoding="utf-8")
-
-    print(f"Applied ORI 3.6.7 quality fixes to {source}")
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("source", type=Path)
-    args = parser.parse_args()
-    patch(args.source.resolve())
-
-
-if __name__ == "__main__":
-    main()
