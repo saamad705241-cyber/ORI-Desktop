@@ -955,3 +955,17 @@ def test_helper_closes_stuck_old_process_after_bounded_wait():
 def test_installer_does_not_auto_launch_ori():
     installer = (ROOT / "installer" / "ORI.iss").read_text(encoding="utf-8")
     assert "[Run]" not in installer
+""", encoding="utf-8")
+
+    print(f"Applied ORI 3.6.7 quality fixes to {source}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("source", type=Path)
+    args = parser.parse_args()
+    patch(args.source.resolve())
+
+
+if __name__ == "__main__":
+    main()
