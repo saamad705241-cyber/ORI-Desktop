@@ -883,9 +883,9 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
             )
         contract_text = contract_text.replace(
             '    assert "skipifsilent" in source',
-            '    assert "[Run]" not in source\\n    assert "LAUNCH ORI" in source',
+            '    assert "[Run]" not in source' + chr(10) + '    assert "LAUNCH ORI" in source',
         )
-        contract_test.write_text(contract_text, encoding="utf-8", newline="\\n")
+        contract_test.write_text(contract_text, encoding="utf-8")
 
     # The uploaded UI is on the consolidated UPDATE NOW action; older tests
     # still look for the retired OPEN UPDATE ASSISTANT label.
@@ -895,7 +895,6 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
             test_path.write_text(
                 test_text.replace("OPEN UPDATE ASSISTANT", "UPDATE NOW"),
                 encoding="utf-8",
-                newline="\\n",
             )
 
     replace_once(
