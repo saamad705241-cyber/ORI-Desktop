@@ -877,11 +877,11 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
         ):
             contract_text = contract_text.replace(
                 old_assertion,
-                '    assert "Waiting up to 20 seconds" in source\\n'
-                '    assert "CloseMainWindow()" in source\\n'
+                '    assert "Waiting up to 20 seconds" in source\n'
+                '    assert "CloseMainWindow()" in source\n'
                 '    assert "Stop-Process -Id $AppPid -Force" in source',
             )
-        contract_test.write_text(contract_text, encoding="utf-8", newline="\\n")
+        contract_test.write_text(contract_text, encoding="utf-8", newline="\n")
 
     replace_once(
         helper_path,
