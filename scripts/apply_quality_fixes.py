@@ -779,7 +779,7 @@ def test_chatgpt_alias_resolves_to_official_website(monkeypatch):
     ui_path = source / "ui.py"
     ui_text = ui_path.read_text(encoding="utf-8")
     start = ui_text.find("    def _install_downloaded_update(self) -> None:")
-    end = ui_text.find("    def _uninstall_ori(self) -> None:", start)
+    end = ui_text.find("    def _finish_update_flow(", start)
     new_method = '''    def _install_downloaded_update(self) -> None:
         """Open the interactive Windows Setup wizard for the verified installer."""
         data = getattr(self, "_staged_update", None)
@@ -929,7 +929,7 @@ def test_update_now_opens_setup_without_an_extra_restart_confirmation():
     ui = (ROOT / "ui.py").read_text(encoding="utf-8")
     assert 'self._set_update_action("UPDATE NOW", enabled=True, stage="install")' in ui
     assert "Press UPDATE NOW to open the Windows Setup wizard." in ui
-    method = ui.split("def _install_downloaded_update", 1)[1].split("def _uninstall_ori", 1)[0]
+    method = ui.split("def _install_downloaded_update", 1)[1].split("def _finish_update_flow", 1)[0]
     assert "QMessageBox.question" not in method
     assert "schedule_windows_update" in method
     assert "self._quit_for_external_helper()" in method
