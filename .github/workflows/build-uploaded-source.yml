@@ -121,7 +121,7 @@ jobs:
             throw "A private API configuration must not be included in the installer."
           }
 
-      - name: Sign ORI application executable
+      - name: Sign ORI application executable when certificate is configured
         shell: pwsh
         working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         env:
@@ -129,22 +129,32 @@ jobs:
           ORI_SIGNING_PFX_PASSWORD: ${{ secrets.ORI_SIGNING_PFX_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
-          if ([string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_PASSWORD)) {
-            throw "Official release is blocked until ORI_SIGNING_PFX_BASE64 and ORI_SIGNING_PFX_PASSWORD are configured in GitHub Actions Secrets."
+          $hasCertificate = ![string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_BASE64)
+          $hasPassword = ![string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_PASSWORD)
+          if (!$hasCertificate -and !$hasPassword) {
+            Write-Warning "No Authenticode certificate is configured. Continuing with an UNSIGNED QA/publication build; Windows SmartScreen may show its warning."
+            "ORI_SIGNING_STATUS=unsigned (SmartScreen warning possible)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            exit 0
           }
+          if (!$hasCertificate -or !$hasPassword) { throw "Both ORI_SIGNING_PFX_BASE64 and ORI_SIGNING_PFX_PASSWORD must be configured together." }
           $pfxPath = Join-Path $env:RUNNER_TEMP "ori-code-signing.pfx"
-          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:ORI_SIGNING_PFX_BASE64))
-          $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if (!$signTool) { throw "Windows SDK signtool.exe was not found on the runner." }
-          $app = "dist/ORI/ORI.exe"
-          if (!(Test-Path -LiteralPath $app -PathType Leaf)) { throw "ORI.exe is missing before signing." }
-          & $signTool.FullName sign /fd SHA256 /f $pfxPath /p $env:ORI_SIGNING_PFX_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $app
-          if ($LASTEXITCODE -ne 0) { throw "Authenticode signing of ORI.exe failed." }
-          & $signTool.FullName verify /pa /all /v $app
-          if ($LASTEXITCODE -ne 0) { throw "Authenticode signature verification of ORI.exe failed." }
-          Remove-Item -LiteralPath $pfxPath -Force
-          Write-Host "ORI.exe is digitally signed and its Authenticode signature is verified."
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:ORI_SIGNING_PFX_BASE64))
+            $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (!$signTool) { throw "Windows SDK signtool.exe was not found on the runner." }
+            $app = "dist/ORI/ORI.exe"
+            if (!(Test-Path -LiteralPath $app -PathType Leaf)) { throw "ORI.exe is missing before signing." }
+            & $signTool.FullName sign /fd SHA256 /f $pfxPath /p $env:ORI_SIGNING_PFX_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $app
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode signing of ORI.exe failed." }
+            & $signTool.FullName verify /pa /all /v $app
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode signature verification of ORI.exe failed." }
+            "ORI_SIGNING_STATUS=signed" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Host "ORI.exe is digitally signed and its Authenticode signature is verified."
+          }
+          finally {
+            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
+          }
 
       - name: Install Inno Setup and compile final installer
         shell: pwsh
@@ -160,7 +170,7 @@ jobs:
           if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Final ORI Setup EXE was not created." }
           Write-Host "Created ORI-Setup-3.6.6.exe; Authenticode signing is the next required step."
 
-      - name: Sign and verify final installer
+      - name: Sign and verify final installer when certificate is configured
         shell: pwsh
         working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         env:
@@ -168,24 +178,32 @@ jobs:
           ORI_SIGNING_PFX_PASSWORD: ${{ secrets.ORI_SIGNING_PFX_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
-          if ([string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_PASSWORD)) {
-            throw "Official release is blocked: configure ORI_SIGNING_PFX_BASE64 and ORI_SIGNING_PFX_PASSWORD before publishing."
+          $hasCertificate = ![string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_BASE64)
+          $hasPassword = ![string]::IsNullOrWhiteSpace($env:ORI_SIGNING_PFX_PASSWORD)
+          if (!$hasCertificate -and !$hasPassword) {
+            Write-Warning "Publishing unsigned ORI Setup so existing installations can test the in-app updater. SmartScreen may display its warning."
+            exit 0
           }
+          if (!$hasCertificate -or !$hasPassword) { throw "Both ORI_SIGNING_PFX_BASE64 and ORI_SIGNING_PFX_PASSWORD must be configured together." }
           $pfxPath = Join-Path $env:RUNNER_TEMP "ori-code-signing.pfx"
-          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:ORI_SIGNING_PFX_BASE64))
-          $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if (!$signTool) { throw "Windows SDK signtool.exe was not found on the runner." }
-          $installer = "dist/installer/ORI-Setup-3.6.6.exe"
-          if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw "The final installer is missing." }
-          & $signTool.FullName sign /fd SHA256 /f $pfxPath /p $env:ORI_SIGNING_PFX_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $installer
-          if ($LASTEXITCODE -ne 0) { throw "Authenticode signing of ORI Setup failed." }
-          & $signTool.FullName verify /pa /all /v $installer
-          if ($LASTEXITCODE -ne 0) { throw "Authenticode verification of ORI Setup failed." }
-          Remove-Item -LiteralPath $pfxPath -Force
-          Write-Host "ORI Setup is digitally signed and its Authenticode signature is verified."
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:ORI_SIGNING_PFX_BASE64))
+            $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (!$signTool) { throw "Windows SDK signtool.exe was not found on the runner." }
+            $installer = "dist/installer/ORI-Setup-3.6.6.exe"
+            if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw "The final installer is missing." }
+            & $signTool.FullName sign /fd SHA256 /f $pfxPath /p $env:ORI_SIGNING_PFX_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $installer
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode signing of ORI Setup failed." }
+            & $signTool.FullName verify /pa /all /v $installer
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode verification of ORI Setup failed." }
+            Write-Host "ORI Setup is digitally signed and its Authenticode signature is verified."
+          }
+          finally {
+            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
+          }
 
-      - name: Create checksum for signed installer
+      - name: Create checksum for final installer after optional signing
         shell: pwsh
         working-directory: ${{ runner.temp }}/ori-source/ORI-3.6.5-Source-Publishing-SAFE
         run: |
