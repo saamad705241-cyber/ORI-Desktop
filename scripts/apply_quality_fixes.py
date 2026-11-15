@@ -248,6 +248,18 @@ from core.voice_leveler        import VoiceLeveler''',
         label="media tool instructions",
     )
 
+    replace_once(
+        source / "actions" / "youtube_video.py",
+        "def _handle_play(parameters: dict, player) -> str:\n    query = parameters.get(\"query\", \"\").strip()\n    if not query:\n        return \"Please tell me what you'd like to watch, sir.\"\n\n    if player:\n        player.write_log(f\"[YouTube] Searching: {query}\")\n\n    print(f\"[YouTube] 🔍 Scraping first non-Shorts video for: {query}\")\n\n    video_url = _scrape_first_video_url(query)\n\n    if video_url:\n        print(f\"[YouTube] ▶️ Opening: {video_url}\")\n        _open_url(video_url)\n        return f\"Playing: {query}\"\n\n    print(\"[YouTube] ⚠️ Scrape failed, opening filtered search page\")\n    fallback_url = (\n        f\"https://www.youtube.com/results\"\n        f\"?search_query={quote_plus(query)}\"\n        f\"&sp={_YT_VIDEO_FILTER}\"\n    )\n    _open_url(fallback_url)\n    return f\"Opened YouTube search for: {query} (manual selection required)\"",
+        "def _handle_play(parameters: dict, player) -> str:\n    \"\"\"Compatibility route: requested playback always uses ORI's managed media player.\"\"\"\n    query = str(parameters.get(\"query\", \"\") or \"\").strip()\n    if not query:\n        return \"Please tell me what song or video you'd like to play.\"\n    if player:\n        player.write_log(f\"[Media] Opening requested playback: {query}\")\n    try:\n        from actions.video_player import video_player\n        result = video_player({\"action\": \"play\", \"source\": query}, player=player)\n        return str(result or \"Media playback request did not return a confirmation.\")\n    except Exception as exc:\n        return f\"Media playback could not be started: {type(exc).__name__}: {exc}\"",
+        label="delegate legacy YouTube play action to ORI media player",
+    )
+    replace_once(
+        source / "actions" / "youtube_video.py",
+        "\"description\": \"play | summarize | get_info | trending (default: play)\"",
+        "\"description\": \"play (compatibility alias to video_player) | summarize | get_info | trending\"",
+        label="document YouTube play compatibility delegation",
+    )
     # Route explicit song/music requests through the player that owns the audio stream.
     replace_once(
         source / "actions" / "video_player.py",
@@ -587,6 +599,26 @@ def test_browser_only_youtube_tool_is_not_described_as_the_playback_route():
 """,
         encoding="utf-8",
     )
+
+    with routing_test.open("a", encoding="utf-8") as handle:
+        handle.write('''
+
+
+def test_legacy_youtube_play_action_delegates_to_managed_media_player(monkeypatch):
+    from actions import youtube_video, video_player as video_player_module
+
+    calls = []
+    monkeypatch.setattr(
+        video_player_module,
+        "video_player",
+        lambda params, player=None: calls.append((params, player)) or "status=opening",
+    )
+    fake_player = object()
+    result = youtube_video._handle_play({"query": "Arijit Singh songs"}, fake_player)
+
+    assert result == "status=opening"
+    assert calls == [({"action": "play", "source": "Arijit Singh songs"}, fake_player)]
+''')
 
     # Regression tests for the new behaviours.
     replace_once(
