@@ -61,20 +61,6 @@ jobs:
           [System.IO.File]::WriteAllText($mainPath, $mainText, [System.Text.UTF8Encoding]::new($false))
           Write-Host "Applied proactive-mode event loop correction to the extracted source."
 
-          $uiFile = Join-Path $source "ui.py"
-          Write-Host "=== ORI SOURCE UI UPDATE DIAGNOSTICS BEGIN ==="
-          $uiText = Get-Content -LiteralPath $uiFile -Raw
-          foreach ($needle in @("def _handle_update_action", "def _apply_app_update_check", "def _apply_app_update_download", "def _install_downloaded_update", "def _download_app_update", "def _set_update_action")) {
-            $at = $uiText.IndexOf($needle)
-            if ($at -ge 0) {
-              $end = [Math]::Min($uiText.Length, $at + 11000)
-              Write-Host ("=== SOURCE METHOD " + $needle + " ===")
-              Write-Host $uiText.Substring($at, $end - $at)
-            } else { Write-Host ("=== SOURCE METHOD MISSING " + $needle + " ===") }
-          }
-          Write-Host "=== SOURCE UPDATE SETTINGS PANEL ==="
-          Write-Host $uiText.Substring([Math]::Max(0, $uiText.IndexOf("self._update_flow_stage") - 1200), 4500)
-          Write-Host "=== ORI SOURCE UI UPDATE DIAGNOSTICS END ==="
 
           python (Join-Path $env:GITHUB_WORKSPACE "scripts/apply_quality_fixes.py") $source
           if ($LASTEXITCODE -ne 0) { throw "ORI quality fixes could not be applied." }
