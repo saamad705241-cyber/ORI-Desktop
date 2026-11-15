@@ -248,6 +248,40 @@ from core.voice_leveler        import VoiceLeveler''',
         label="media tool instructions",
     )
 
+    # Route explicit song/music requests through the player that owns the audio stream.
+    replace_once(
+        source / "actions" / "video_player.py",
+        ```        "Plays a VIDEO on the assistant's own display in the central visualisation area "```,
+        ```        "Plays MUSIC, SONGS and VIDEOS through ORI's central display player; "```,
+        label="media tool music capability",
+    )
+    replace_once(
+        source / "actions" / "video_player.py",
+        ```        "user wants to WATCH something on screen: 'play the new Dune trailer', "```,
+        ```        "user wants to PLAY or HEAR music/songs, or WATCH something on screen: "
+        "'play Arijit Singh songs', 'play this song', 'listen to music', "
+        "'play the new Dune trailer', "```,
+        label="route natural-language song requests",
+    )
+    replace_once(
+        source / "actions" / "video_player.py",
+        ```        "Do NOT use 'youtube_video' for this: that optional plugin opens videos "```,
+        ```        "Do NOT use 'youtube_video' for playback: its play action only opens a browser page. "```,
+        label="prefer ORI-managed playback over browser-only YouTube",
+    )
+    replace_once(
+        source / "actions" / "youtube_video.py",
+        ```    "description": "Controls YouTube. Use for: playing videos, summarizing a video's content, getting video info, or showing trending videos.",```,
+        ```    "description": (
+        "Use only for summarizing a YouTube video's content, getting video information, "
+        "or showing trending videos. Do NOT use this tool to play music, songs or videos: "
+        "its play action only opens a browser page and does not manage ORI's media audio. "
+        "For any actual playback request, use video_player so sound starts on and ORI "
+        "can manage buffering, mute state and microphone handoff."
+    ),```,
+        label="route YouTube playback away from browser-only tool",
+    )
+
     # Add an independent progress watchdog for the YouTube audio player.
     replace_once(
         source / "core" / "media_sync.py",
@@ -529,6 +563,30 @@ def _launch_windows(app_name: str) -> bool:
         '''"description": "Exact name of the application (e.g. 'WhatsApp', 'Chrome', 'Spotify')"''',
         '''"description": "Application or website to open, e.g. 'Chrome', 'ChatGPT', 'WhatsApp' or 'Spotify'. Use 'ChatGPT' for https://chatgpt.com."''',
         label="open_app parameter guidance",
+    )
+
+    # Regression tests for song/media tool routing.
+    routing_test = source / "tests" / "test_media_routing.py"
+    routing_test.write_text(
+        """from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_video_player_is_the_route_for_music_and_song_requests():
+    declaration = (ROOT / "actions" / "video_player.py").read_text(encoding="utf-8")
+    assert "Plays MUSIC, SONGS and VIDEOS" in declaration
+    assert "PLAY or HEAR music/songs" in declaration
+    assert "Do NOT use 'youtube_video' for playback" in declaration
+
+
+def test_browser_only_youtube_tool_is_not_described_as_the_playback_route():
+    declaration = (ROOT / "actions" / "youtube_video.py").read_text(encoding="utf-8")
+    assert "Do NOT use this tool to play music, songs or videos" in declaration
+    assert "use video_player" in declaration
+""",
+        encoding="utf-8",
+        newline="\\n",
     )
 
     # Regression tests for the new behaviours.
